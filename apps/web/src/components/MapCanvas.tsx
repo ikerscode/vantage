@@ -9,9 +9,11 @@ import { useAnalysis } from "../api/analyses";
 import { useAois } from "../api/aois";
 import { useDetections } from "../api/detections";
 import { darkVoidStyle } from "../lib/maplibreStyle";
+import { getRuntimeConfig } from "../lib/runtimeConfig";
 import { ndviTilejsonUrl, trueColorTilejsonUrl } from "../lib/tileUrl";
 import { useAnalysisStore } from "../store/analysisStore";
 import { useAoiStore } from "../store/aoiStore";
+import { useAuthStore } from "../store/authStore";
 import { useMapStore } from "../store/mapStore";
 
 // Observation, not engagement — nothing here reads as targeting (no
@@ -66,6 +68,20 @@ export function MapCanvas() {
       pitch: viewState.pitch,
       bearing: viewState.bearing,
       attributionControl: false,
+      // SEC-01: the tiler requires X-Tiler-Token on every request. Reads
+      // the current token from the store at request time (not captured at
+      // map-construction time) since it arrives asynchronously, after the
+      // dev-auth bootstrap — see api/auth.ts, store/authStore.ts.
+      transformRequest: (url, resourceType) => {
+        const { tilerBaseUrl } = getRuntimeConfig();
+        if (resourceType === "Tile" && url.startsWith(tilerBaseUrl)) {
+          const tilerToken = useAuthStore.getState().tilerToken;
+          if (tilerToken) {
+            return { url, headers: { "X-Tiler-Token": tilerToken } };
+          }
+        }
+        return { url };
+      },
     });
     mapRef.current = map;
 

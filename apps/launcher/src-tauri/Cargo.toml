@@ -1,0 +1,26 @@
+[package]
+name = "vantage-launcher"
+version = "0.1.0"
+edition = "2021"
+description = "VANTAGE desktop launcher: brings up the packaged container stack, health-gates the splash screen, and serves the bundled mission-console UI. See ../launcher-core for the testable orchestration logic this binary is a thin GUI shell around."
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+tauri-plugin-log = "2"
+tauri-plugin-opener = "2"
+vantage-launcher-core = { path = "../launcher-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+
+# Not used directly — forces Cargo's feature unification to build libdbus
+# from source (needs only a C compiler) instead of linking the system
+# libdbus-1-dev package, which isn't installable without root in every build
+# environment (this one included — see PACKAGE_REPORT.md). tao (Tauri's
+# Linux windowing layer) pulls in dbus unconditionally; this is the one
+# lever available to avoid that system dependency without root.
+dbus = { version = "0.9", features = ["vendored"] }

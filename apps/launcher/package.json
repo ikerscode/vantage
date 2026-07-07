@@ -1,0 +1,14 @@
+{
+  "name": "vantage-launcher",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tauri CLI pin for the VANTAGE desktop launcher. The launcher has no frontend of its own — tauri.conf.json points frontendDist at ../web/dist (see apps/web's production build).",
+  "scripts": {
+    "build": "tauri build",
+    "dev": "tauri dev",
+    "icon": "tauri icon"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4"
+  }
+}

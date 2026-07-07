@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>VANTAGE — starting</title>
+    <style>
+      /* Standalone, deliberately not part of the Vite/React build — this is
+         the first thing shown (BRIEF v1.3 §2, §11: "do not reveal the UI
+         until all services are green... honest progress on the splash"),
+         so it can't depend on anything the stack it's waiting on provides.
+         Colors match apps/web/src/styles.css's token values directly since
+         importing the real stylesheet here would pull in the whole app. */
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 24px;
+        background: #06080b;
+        color: #e6edf3;
+        font-family: -apple-system, "Segoe UI", sans-serif;
+      }
+      .mark {
+        width: 64px;
+        height: 64px;
+        border: 3px solid #3fb8d4;
+        border-radius: 50%;
+        border-top-color: transparent;
+        animation: spin 1.1s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      h1 {
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #8b949e;
+        margin: 0;
+      }
+      #status {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 13px;
+        color: #5fd3ee;
+        min-height: 18px;
+      }
+      #error {
+        display: none;
+        max-width: 520px;
+        text-align: center;
+        font-size: 13px;
+        color: #e8927c;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="mark"></div>
+    <h1>VANTAGE</h1>
+    <div id="status">starting…</div>
+    <div id="error"></div>
+    <script>
+      // The Rust side (apps/launcher/src-tauri/src/boot.rs) emits
+      // "vantage://boot-progress" events with { message, done } while
+      // polling launcher-core::health, then either calls
+      // window.location.replace("/index.html") itself once every service
+      // reports healthy, or emits "vantage://boot-failed" with a guided
+      // message (missing runtime, port conflict, etc.) if it can't.
+      const statusEl = document.getElementById("status");
+      const errorEl = document.getElementById("error");
+
+      if (window.__TAURI__) {
+        window.__TAURI__.event.listen("vantage://boot-progress", (event) => {
+          statusEl.textContent = event.payload.message;
+        });
+        window.__TAURI__.event.listen("vantage://boot-failed", (event) => {
+          document.querySelector(".mark").style.display = "none";
+          statusEl.textContent = "startup failed";
+          errorEl.style.display = "block";
+          errorEl.textContent = event.payload.message;
+        });
+      } else {
+        // Opened directly in a browser (dev-time preview of this file only,
+        // not a real boot sequence) rather than inside the launcher.
+        statusEl.textContent = "(not running inside the VANTAGE launcher)";
+      }
+    </script>
+  </body>
+</html>

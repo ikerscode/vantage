@@ -1,9 +1,9 @@
-const TILER_BASE_URL = import.meta.env.VITE_TILER_BASE_URL ?? "http://localhost:8001";
+import { getRuntimeConfig } from "./runtimeConfig";
 
 /** True-color: Earth Search's "visual" asset is already a single-file RGB COG. */
 export function trueColorTilejsonUrl(visualHref: string): string {
   const params = new URLSearchParams({ url: visualHref });
-  return `${TILER_BASE_URL}/cog/WebMercatorQuad/tilejson.json?${params.toString()}`;
+  return `${getRuntimeConfig().tilerBaseUrl}/cog/WebMercatorQuad/tilejson.json?${params.toString()}`;
 }
 
 /**
@@ -26,5 +26,5 @@ export function ndviTilejsonUrl(stacItemSelfHref: string): string {
   params.append("assets", "red");
   params.append("assets", "nir");
   params.append("rescale", "-1,1");
-  return `${TILER_BASE_URL}/stac/WebMercatorQuad/tilejson.json?${params.toString()}`;
+  return `${getRuntimeConfig().tilerBaseUrl}/stac/WebMercatorQuad/tilejson.json?${params.toString()}`;
 }

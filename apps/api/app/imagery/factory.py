@@ -4,12 +4,15 @@ from app.core.config import settings
 from app.imagery.base import ImagerySource
 from app.imagery.earth_search import EarthSearchSource
 from app.imagery.pgstac import PgstacSource
+from app.imagery.static_catalog import StaticCatalogSource
 
 
 @lru_cache
 def _build_source() -> ImagerySource:
     if settings.imagery_source == "earth_search":
         return EarthSearchSource()
+    if settings.imagery_source == "static_catalog":
+        return StaticCatalogSource()
     if settings.imagery_source == "pgstac":
         return PgstacSource()
     raise ValueError(f"unknown IMAGERY_SOURCE: {settings.imagery_source!r}")

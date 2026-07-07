@@ -1,0 +1,15 @@
+"""SEC-09: this service decodes and runs a CNN over arbitrary
+caller-supplied image bytes — a shared-token check (mirroring
+services/tiler/app/security.py's require_tiler_token) means only apps/api
+can reach it, not anyone who happens to find the port."""
+
+import os
+from typing import Annotated
+
+from fastapi import Header, HTTPException
+
+
+def require_inference_token(x_inference_token: Annotated[str | None, Header()] = None) -> None:
+    expected = os.environ.get("INFERENCE_TOKEN", "change-me-dev-inference-token")
+    if x_inference_token != expected:
+        raise HTTPException(status_code=401, detail="missing or invalid X-Inference-Token header")

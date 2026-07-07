@@ -1,0 +1,73 @@
+{
+  "aoi_name": "Demo AOI \u2014 Central Valley, CA",
+  "aoi_geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [
+          -119.8,
+          36.7
+        ],
+        [
+          -119.65,
+          36.7
+        ],
+        [
+          -119.65,
+          36.85
+        ],
+        [
+          -119.8,
+          36.85
+        ],
+        [
+          -119.8,
+          36.7
+        ]
+      ]
+    ]
+  },
+  "collection": "sentinel-2-l2a",
+  "items": [
+    {
+      "id": "S2B_11SKA_20250619_0_L2A",
+      "collection": "sentinel-2-l2a",
+      "datetime": "2025-06-19T18:54:20.509000Z",
+      "cloud_cover": 0.000756,
+      "bbox": [
+        -119.8,
+        36.7,
+        -119.65,
+        36.85
+      ],
+      "assets": {
+        "visual": "2025-06-19/visual.tif",
+        "red": "2025-06-19/red.tif",
+        "green": "2025-06-19/green.tif",
+        "blue": "2025-06-19/blue.tif",
+        "nir": "2025-06-19/nir.tif",
+        "scl": "2025-06-19/scl.tif"
+      }
+    },
+    {
+      "id": "S2C_10SGF_20251101_0_L2A",
+      "collection": "sentinel-2-l2a",
+      "datetime": "2025-11-01T18:54:34.225000Z",
+      "cloud_cover": 0.000491,
+      "bbox": [
+        -119.8,
+        36.7,
+        -119.65,
+        36.85
+      ],
+      "assets": {
+        "visual": "2025-11-01/visual.tif",
+        "red": "2025-11-01/red.tif",
+        "green": "2025-11-01/green.tif",
+        "blue": "2025-11-01/blue.tif",
+        "nir": "2025-11-01/nir.tif",
+        "scl": "2025-11-01/scl.tif"
+      }
+    }
+  ]
+}

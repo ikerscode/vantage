@@ -9,20 +9,22 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@deck.gl-community/editable-layers": "^9.3.7",
+    "@deck.gl/mapbox": "^9.3.6",
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/ibm-plex-sans": "^5.2.8",
+    "@tanstack/react-query": "^5.101.2",
+    "deck.gl": "^9.3.6",
+    "maplibre-gl": "^5.24.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "maplibre-gl": "^5.24.0",
-    "deck.gl": "^9.3.6",
-    "@deck.gl/mapbox": "^9.3.6",
-    "@deck.gl-community/editable-layers": "^9.3.7",
-    "zustand": "^5.0.14",
-    "@tanstack/react-query": "^5.101.2"
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^5.2.0",
     "typescript": "^5.9.3",
-    "vite": "^5.4.21"
+    "vite": "^7.3.6"
   }
 }

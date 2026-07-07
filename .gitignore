@@ -14,18 +14,34 @@ dist/
 .vite/
 *.tsbuildinfo
 
+# Rust (apps/launcher) — build output only; Cargo.lock IS tracked
+# (application crate, reproducible builds matter for the packaged app).
+target/
+
 # Celery (apps/api, run locally without a real broker-backed beat schedule store)
 celerybeat-schedule.db
 celerybeat.pid
+
+# Redis snapshot — dropped in whatever CWD a native (non-container) redis-server
+# happened to be started from during local dev; never something to commit.
+dump.rdb
 
 # Env / secrets
 infra/.env
 .env
 .env.local
+# Rendered from infra/db-init/01-roles.sql.template by
+# scripts/generate_dev_secrets.py — real per-checkout passwords, never
+# committed (SEC-02/SEC-04). The .template IS tracked.
+infra/db-init/01-roles.sql
 
 # Editors / OS
 .vscode/
 .idea/
 .DS_Store
+
+# Verification run output — real analysis IDs/AOI geometries from dev runs,
+# not something that should accumulate in git history (SEC-12).
+run_artifacts/
 
 # Docker / data volumes bind-mounted locally (none tracked; compose uses named volumes)

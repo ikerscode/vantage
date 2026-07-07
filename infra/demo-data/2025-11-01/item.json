@@ -1,0 +1,94 @@
+{
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "id": "S2C_10SGF_20251101_0_L2A",
+  "collection": "sentinel-2-l2a",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [
+          -119.8,
+          36.7
+        ],
+        [
+          -119.65,
+          36.7
+        ],
+        [
+          -119.65,
+          36.85
+        ],
+        [
+          -119.8,
+          36.85
+        ],
+        [
+          -119.8,
+          36.7
+        ]
+      ]
+    ]
+  },
+  "bbox": [
+    -119.8,
+    36.7,
+    -119.65,
+    36.85
+  ],
+  "properties": {
+    "datetime": "2025-11-01T18:54:34.225000Z",
+    "eo:cloud_cover": 0.000491
+  },
+  "assets": {
+    "visual": {
+      "href": "/data/demo/2025-11-01/visual.tif",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": [
+        "data"
+      ]
+    },
+    "red": {
+      "href": "/data/demo/2025-11-01/red.tif",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": [
+        "data"
+      ]
+    },
+    "green": {
+      "href": "/data/demo/2025-11-01/green.tif",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": [
+        "data"
+      ]
+    },
+    "blue": {
+      "href": "/data/demo/2025-11-01/blue.tif",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": [
+        "data"
+      ]
+    },
+    "nir": {
+      "href": "/data/demo/2025-11-01/nir.tif",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": [
+        "data"
+      ]
+    },
+    "scl": {
+      "href": "/data/demo/2025-11-01/scl.tif",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": [
+        "data"
+      ]
+    }
+  },
+  "links": [
+    {
+      "rel": "self",
+      "href": "/data/demo/2025-11-01/item.json",
+      "type": "application/json"
+    }
+  ]
+}

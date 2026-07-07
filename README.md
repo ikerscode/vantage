@@ -4,6 +4,12 @@ A satellite-imagery intelligence workbench for defense/ISR analysts. Analysts de
 
 See `CLAUDE.md` for the always-on architectural context (invariants, conventions) that governs this codebase.
 
+## Install the app vs. run from source
+
+**Most users**: download a per-OS installer and run it — no dev environment needed. See **[INSTALL.md](INSTALL.md)**, and **[docs/AIRGAP.md](docs/AIRGAP.md)** for fully-offline/air-gapped deployment. The installer bundles a desktop launcher (Tauri) that brings up the same container stack described below, plus bundled demo Sentinel-2 imagery so the app works immediately with no internet.
+
+**Contributors / anyone modifying the code**: keep reading — this section is the source-build path.
+
 ## Stack
 
 | Layer | Choice |
@@ -23,10 +29,12 @@ See `CLAUDE.md` for the always-on architectural context (invariants, conventions
 ```
 apps/api        FastAPI backend — AOIs, STAC search, change detection, monitors, events, detections
 apps/web        React HUD (MapCanvas, TemporalScrubber, AOIPanel, LayersControl, ResultsFeed, CommandBar, Inspector)
+apps/launcher   Desktop launcher (Tauri) — packages the stack into per-OS installers, see INSTALL.md
 services/tiler  TiTiler wrapper — /cog (single-file COGs) + /stac (multi-asset STAC band math, e.g. NDVI)
 services/inference  Placeholder object detector (torchvision Faster R-CNN, COCO-pretrained)
 packages/geo    Pure geospatial functions — NDVI, cloud masking, change diff, pixel↔geo transforms, chipping
-infra           docker-compose.yml, .env.example
+infra           docker-compose.yml (dev), docker-compose.prod.yml (packaged app), .env.example
+scripts/package Offline-installer build scripts — fetch demo data, build/save/load images
 ```
 
 ## Quick start
@@ -73,5 +81,6 @@ VANTAGE is meant to be self-hostable with no hard runtime dependency on external
 - `apps/api/app/imagery/pgstac.py` — local/air-gapped catalog, `NotImplementedError` stub only.
 - Change detection picks a single best-covering Sentinel-2 scene per date; AOIs spanning multiple MGRS tiles fail clearly rather than mosaicking (`TODO(v2)` in `change_detection_pipeline.py`).
 - Placeholder detection tiles date B's true-color imagery into a small fixed grid (≤9 chips) rather than running on the full scene or targeting the change mask specifically — it demonstrates the pipeline end-to-end, not production-grade recall.
-- No least-privilege DB role yet (`pypgstac migrate` and the app share the bootstrap Postgres superuser).
+- Least-privilege DB roles are in place for the app itself (`vantage_migrate` owns schema DDL, `vantage_app` is DML-only at runtime — see `infra/db-init/01-roles.sql`); `pypgstac migrate` alone still runs as the bootstrap superuser (documented exception, see that file's comments — pypgstac's own role grants fail under a lower-privilege role).
 - The tiler and inference services have no auth of their own — reachable only from other compose services, not exposed publicly.
+- Packaged-app distribution (Tauri desktop launcher, offline installers) is v1.3 — see `INSTALL.md`, `docs/AIRGAP.md`, and `PACKAGE_REPORT.md` for what's genuinely built and verified there vs. environment-blocked in this repo's own dev history.

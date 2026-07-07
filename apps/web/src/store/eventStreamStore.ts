@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { API_BASE_URL } from "../api/client";
+import { getApiBaseUrl } from "../api/client";
 import type { EventRow } from "../api/types";
 
 export type SseStatus = "connecting" | "open" | "down";
@@ -40,7 +40,7 @@ export function ensureEventStreamConnected(token: string | null): void {
   useEventStreamStore.setState({ status: "connecting", connectedToken: token });
 
   (async () => {
-    const response = await fetch(`${API_BASE_URL}/api/events/stream`, {
+    const response = await fetch(`${getApiBaseUrl()}/api/events/stream`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: controller.signal,
     });

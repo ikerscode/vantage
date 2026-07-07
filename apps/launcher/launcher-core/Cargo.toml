@@ -1,0 +1,15 @@
+[package]
+name = "vantage-launcher-core"
+version = "0.1.0"
+edition = "2021"
+description = "Non-GUI lifecycle logic for the VANTAGE desktop launcher: secret generation, compose orchestration, health-gating. Deliberately has zero dependency on the `tauri` crate so it builds and tests on any machine with a Rust toolchain, independent of the platform webview libraries the GUI shell (../src-tauri) needs."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.8"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+dirs = "5"
+
+[dev-dependencies]
+tempfile = "3"

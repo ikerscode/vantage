@@ -1,3 +1,20 @@
+# SEC-06: applied to every app-owned service below (not the third-party
+# db/redis/minio images, and not the one-shot init containers, to keep this
+# pass's blast radius matched to what apps/api/services/tiler/services/inference's
+# own Dockerfiles were changed to support — see those Dockerfiles' new
+# non-root USER). no-new-privileges blocks setuid-based privilege escalation;
+# cap_drop: ALL removes every Linux capability none of these processes need
+# (no raw sockets, no ptrace, nothing); read_only + a /tmp tmpfs means even a
+# code-execution bug can't persist a payload to disk.
+x-hardened: &hardened
+  security_opt:
+    - "no-new-privileges:true"
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp
+
 services:
   db:
     image: postgis/postgis:16-3.4
@@ -18,21 +35,29 @@ services:
   # history) alongside our `public` schema, which Alembic owns exclusively.
   # This is the seam a v2 local/air-gapped ImagerySource will read from — v1
   # app code doesn't query it yet (see apps/api/app/imagery/pgstac.py).
+  # SEC-01/SEC-07: pypgstac is baked into this image at build time (hash-
+  # pinned via infra/pgstac-migrate/requirements.lock.txt), not pip-installed
+  # at container startup — see infra/pgstac-migrate/Dockerfile.
   pgstac-migrate:
-    image: python:3.11-slim
+    build:
+      context: ..
+      dockerfile: infra/pgstac-migrate/Dockerfile
     env_file: .env
-    command: >
-      sh -c "pip install --no-cache-dir 'pypgstac[psycopg]~=0.8' &&
-      pypgstac migrate --dsn postgresql://$$POSTGRES_USER:$$POSTGRES_PASSWORD@db:5432/$$POSTGRES_DB"
     depends_on:
       db:
         condition: service_healthy
     restart: "no"
 
+  # SEC-08: requires auth even though it's never published on a host port —
+  # a compromised container elsewhere on this compose network shouldn't get
+  # a free pass to the broker. ${REDIS_PASSWORD} resolves from infra/.env
+  # (docker compose auto-loads a .env next to the compose file for this
+  # kind of command-level interpolation).
   redis:
     image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -77,8 +102,11 @@ services:
     # migration role (vantage_migrate, owns the schema) — the only place in
     # the whole stack this role is used. Verified: this role can run Alembic
     # end-to-end without ever touching the bootstrap superuser.
+    # SEC-12: password comes from ${VANTAGE_MIGRATE_PASSWORD} (infra/.env),
+    # not a literal here — infra/db-init/01-roles.sql is templated from the
+    # same variable (see scripts/generate_dev_secrets.py) so they can't drift.
     environment:
-      DATABASE_URL: postgresql+psycopg://vantage_migrate:changeme-migrate-dev@db:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql+psycopg://vantage_migrate:${VANTAGE_MIGRATE_PASSWORD}@db:5432/${POSTGRES_DB}
     command: alembic upgrade head
     depends_on:
       db:
@@ -88,13 +116,18 @@ services:
     restart: "no"
 
   api:
+    <<: *hardened
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
     env_file: .env
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    # SEC-03: loopback-only — this is a single-workstation dev stack, not a
+    # LAN service. The container's own bind (--host 0.0.0.0 above) is fine;
+    # it's the HOST-side publish address that controls real network
+    # exposure, and that's what this binds to 127.0.0.1.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       api-migrate:
         condition: service_completed_successfully
@@ -104,6 +137,7 @@ services:
         condition: service_completed_successfully
 
   worker:
+    <<: *hardened
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
@@ -120,6 +154,7 @@ services:
         condition: service_healthy
 
   beat:
+    <<: *hardened
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
@@ -137,12 +172,13 @@ services:
   # public Earth Search COGs via /vsicurl/ and our own MinIO output COGs via
   # /vsis3/ from the same process (see services/tiler/app/main.py).
   tiler:
+    <<: *hardened
     build:
       context: ..
       dockerfile: services/tiler/Dockerfile
     env_file: .env
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     depends_on:
       minio:
         condition: service_healthy
@@ -152,6 +188,7 @@ services:
   # Celery worker right after a successful change-detection analysis; not
   # exposed externally, only worker/api reach it over the compose network.
   inference:
+    <<: *hardened
     build:
       context: ..
       dockerfile: services/inference/Dockerfile
@@ -163,10 +200,13 @@ services:
       retries: 10
       start_period: 30s
 
-  # NOTE: `web` (apps/web) is intentionally not defined here yet — it can't be
-  # built/run in this environment (no Node.js), so adding a compose stanza for
-  # it now would be a half-wired seam. Run it with `npm install && npm run dev`
-  # directly (see apps/web/.env.example for VITE_API_BASE_URL/VITE_TILER_BASE_URL).
+  # NOTE: `web` (apps/web) is intentionally not defined here — for dev, run it
+  # with `npm install && npm run dev` directly; the api/tiler base URLs come
+  # from apps/web/public/runtime-config.json (fetched at app startup, not a
+  # build-time env var — see apps/web/src/lib/runtimeConfig.ts), whose
+  # checked-in defaults already match this compose file's port mappings.
+  # The packaged desktop build (infra/docker-compose.prod.yml) bundles the
+  # frontend into the Tauri launcher instead of running it as a container.
 
 volumes:
   db_data:

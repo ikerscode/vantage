@@ -67,9 +67,12 @@ def _chip_to_png_bytes(chip: np.ndarray) -> bytes:
 
 
 def _detect_chip(png_bytes: bytes) -> list[dict]:
+    # SEC-09: shared-secret gate on the inference service — see
+    # services/inference/app/security.py.
     response = httpx.post(
         f"{settings.inference_base_url}/detect",
         json={"image_base64": base64.b64encode(png_bytes).decode()},
+        headers={"X-Inference-Token": settings.inference_token},
         timeout=60.0,
     )
     response.raise_for_status()

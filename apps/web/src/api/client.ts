@@ -1,6 +1,9 @@
+import { getRuntimeConfig } from "../lib/runtimeConfig";
 import { useAuthStore } from "../store/authStore";
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+export function getApiBaseUrl(): string {
+  return getRuntimeConfig().apiBaseUrl;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -17,7 +20,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  const response = await fetch(`${getApiBaseUrl()}${path}`, { ...init, headers });
   if (!response.ok) {
     const detail = await response.text();
     throw new ApiError(response.status, detail || response.statusText);

@@ -1,0 +1,18 @@
+-- Production/packaged counterpart of infra/db-init/01-roles.sql — identical
+-- role structure and rationale (see that file's comments), except the
+-- passwords are double-curly-brace tokens rendered at first run by
+-- scripts/package/generate_secrets.py, not hardcoded dev literals. The
+-- rendered values MUST match VANTAGE_MIGRATE_PASSWORD and the vantage_app
+-- password in the sibling ${VANTAGE_DATA_DIR}/config/.env — generate_secrets
+-- renders both from the same in-memory values in one run so they can't drift.
+
+CREATE ROLE vantage_migrate LOGIN PASSWORD '{{VANTAGE_MIGRATE_PASSWORD}}' CREATEROLE;
+CREATE ROLE vantage_app LOGIN PASSWORD '{{VANTAGE_APP_PASSWORD}}';
+
+GRANT CREATE, USAGE ON SCHEMA public TO vantage_migrate;
+GRANT USAGE ON SCHEMA public TO vantage_app;
+
+ALTER DEFAULT PRIVILEGES FOR ROLE vantage_migrate IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO vantage_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE vantage_migrate IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO vantage_app;

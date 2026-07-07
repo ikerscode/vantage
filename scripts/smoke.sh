@@ -18,6 +18,11 @@ TILER_BASE_URL="${TILER_BASE_URL:-http://localhost:8001}"
 APPS_API_DIR="${APPS_API_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../apps/api" && pwd)}"
 PYTHON_BIN="${PYTHON_BIN:-$APPS_API_DIR/.venv/bin/python}"
 PSQL_DSN="${PSQL_DSN:-postgresql://vantage@localhost:5432/vantage}"
+# SEC-01: must match the tiler's TILER_TOKEN env var (services/tiler/app/security.py) —
+# defaults to the same dev fallback apps/api's Settings.tiler_token uses, so
+# this keeps working out of the box against a plain `docker compose up`/
+# native dev stack without extra setup.
+TILER_TOKEN="${TILER_TOKEN:-change-me-dev-tiler-token}"
 
 # Fixed, reproducible test AOI + date windows (California Central Valley
 # farmland/airport; chosen for low cloud cover and a real NDVI signal —
@@ -105,13 +110,13 @@ SELF_HREF=$(echo "$SCENES_A" | python3 -c "import json,sys; s=json.load(sys.stdi
 
 step "4. True-color tile (single-file COG via /cog)"
 if [ -n "$VISUAL_HREF" ]; then
-  TILEJSON=$(curl -sS --max-time 30 -G "$TILER_BASE_URL/cog/WebMercatorQuad/tilejson.json" --data-urlencode "url=$VISUAL_HREF")
+  TILEJSON=$(curl -sS --max-time 30 -H "X-Tiler-Token: $TILER_TOKEN" -G "$TILER_BASE_URL/cog/WebMercatorQuad/tilejson.json" --data-urlencode "url=$VISUAL_HREF")
   TILE_TMPL=$(echo "$TILEJSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['tiles'][0])" 2>/dev/null)
   ZXY=$(echo "$TILEJSON" | tile_xy_for_tilejson)
   if [ -n "$TILE_TMPL" ] && [ -n "$ZXY" ]; then
     TILE_URL=$(echo "$TILE_TMPL" | sed "s#{z}/{x}/{y}#$ZXY#")
     OUT=$(mktemp)
-    CODE=$(curl -sS -o "$OUT" -w "%{http_code}" --max-time 60 "$TILE_URL")
+    CODE=$(curl -sS -H "X-Tiler-Token: $TILER_TOKEN" -o "$OUT" -w "%{http_code}" --max-time 60 "$TILE_URL")
     SIZE=$(wc -c < "$OUT")
     MAGIC=$(head -c 8 "$OUT" | xxd -p 2>/dev/null | head -c 16 || echo "")
     if [ "$CODE" = "200" ] && [ "$SIZE" -gt 1000 ]; then pass "true-color tile fetched ($SIZE bytes)"; else fail_logic "true-color tile fetch failed: HTTP $CODE, $SIZE bytes"; fi
@@ -125,7 +130,7 @@ fi
 
 step "5. NDVI tile (multi-asset STAC band math via /stac, asset_as_band=true)"
 if [ -n "$SELF_HREF" ]; then
-  NDVI_TILEJSON=$(curl -sS --max-time 30 -G "$TILER_BASE_URL/stac/WebMercatorQuad/tilejson.json" \
+  NDVI_TILEJSON=$(curl -sS --max-time 30 -H "X-Tiler-Token: $TILER_TOKEN" -G "$TILER_BASE_URL/stac/WebMercatorQuad/tilejson.json" \
     --data-urlencode "url=$SELF_HREF" --data-urlencode "expression=(nir-red)/(nir+red)" \
     --data-urlencode "asset_as_band=true" --data-urlencode "assets=red" --data-urlencode "assets=nir" \
     --data-urlencode "rescale=-1,1")
@@ -134,7 +139,7 @@ if [ -n "$SELF_HREF" ]; then
   if [ -n "$NDVI_TMPL" ] && [ -n "$NDVI_ZXY" ]; then
     NDVI_TILE_URL=$(echo "$NDVI_TMPL" | sed "s#{z}/{x}/{y}#$NDVI_ZXY#")
     OUT=$(mktemp)
-    CODE=$(curl -sS -o "$OUT" -w "%{http_code}" --max-time 90 "$NDVI_TILE_URL")
+    CODE=$(curl -sS -H "X-Tiler-Token: $TILER_TOKEN" -o "$OUT" -w "%{http_code}" --max-time 90 "$NDVI_TILE_URL")
     SIZE=$(wc -c < "$OUT")
     if [ "$CODE" = "200" ] && [ "$SIZE" -gt 500 ]; then pass "NDVI tile fetched ($SIZE bytes)"; else fail_logic "NDVI tile fetch failed: HTTP $CODE, $SIZE bytes — if this is InvalidExpression, asset_as_band=true is missing (verified required, see RUN_REPORT.md)"; fi
     rm -f "$OUT"
@@ -165,13 +170,13 @@ else
     pass "analysis completed (status=done)"
     TILEJSON_URL=$(echo "$RESULT" | python3 -c "import json,sys; print(json.load(sys.stdin).get('tilejson_url') or '')" 2>/dev/null)
     if [ -n "$TILEJSON_URL" ]; then
-      CHANGE_TILEJSON=$(curl -sS --max-time 30 "$TILEJSON_URL")
+      CHANGE_TILEJSON=$(curl -sS --max-time 30 -H "X-Tiler-Token: $TILER_TOKEN" "$TILEJSON_URL")
       CHANGE_TMPL=$(echo "$CHANGE_TILEJSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['tiles'][0])" 2>/dev/null)
       CHANGE_ZXY=$(echo "$CHANGE_TILEJSON" | tile_xy_for_tilejson)
       if [ -n "$CHANGE_TMPL" ] && [ -n "$CHANGE_ZXY" ]; then
         CHANGE_TILE_URL=$(echo "$CHANGE_TMPL" | sed "s#{z}/{x}/{y}@1x#$CHANGE_ZXY@1x#")
         OUT=$(mktemp)
-        CODE=$(curl -sS -o "$OUT" -w "%{http_code}" --max-time 60 "$CHANGE_TILE_URL")
+        CODE=$(curl -sS -H "X-Tiler-Token: $TILER_TOKEN" -o "$OUT" -w "%{http_code}" --max-time 60 "$CHANGE_TILE_URL")
         SIZE=$(wc -c < "$OUT")
         if [ "$CODE" = "200" ] && [ "$SIZE" -gt 100 ]; then pass "change-map tile fetched ($SIZE bytes)"; else fail_logic "change-map tile fetch failed: HTTP $CODE (note: fixed zoom/tile coords assume the AOI above — may need adjusting for a different AOI)"; fi
         rm -f "$OUT"

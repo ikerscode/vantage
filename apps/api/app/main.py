@@ -4,7 +4,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.routers import analyses, aois, auth, detections, events, health, monitors, stac
 
-app = FastAPI(title="VANTAGE API", version="0.1.0")
+# SEC-10: /docs, /redoc, /openapi.json expose the full API surface (routes,
+# schemas, param names) to anyone who can reach this process — fine for
+# development, not something a production deployment should serve by
+# default. VANTAGE_ENV=production disables all three; dev keeps them.
+_docs_kwargs = (
+    {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    if settings.vantage_env == "production"
+    else {}
+)
+app = FastAPI(title="VANTAGE API", version="0.1.0", **_docs_kwargs)
 
 app.add_middleware(
     CORSMiddleware,

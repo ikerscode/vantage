@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { useAois } from "../api/aois";
+import { getRuntimeConfig } from "../lib/runtimeConfig";
 import { scaleBarLabel } from "../lib/scaleBar";
 import { useMonitorAlertStatus } from "../lib/monitorAlerts";
 import { useAnalysisStore } from "../store/analysisStore";
@@ -30,6 +31,10 @@ export function StatusStrip() {
   const selectedScene = useAnalysisStore((s) => s.selectedScene);
   const sseStatus = useEventStreamStore((s) => s.status);
   const { isAnyAlert, alertMonitors } = useMonitorAlertStatus();
+  // Only set when running inside the desktop launcher (BRIEF v1.3 §11:
+  // "version stamp visible in-app") — plain docker-compose deployments have
+  // no single meaningful build version, so this segment just doesn't render.
+  const appVersion = getRuntimeConfig().appVersion;
 
   const curText = cursorLatLon
     ? `${Math.abs(cursorLatLon.lat).toFixed(4)}°${cursorLatLon.lat >= 0 ? "N" : "S"} ${Math.abs(cursorLatLon.lon).toFixed(4)}°${cursorLatLon.lon >= 0 ? "E" : "W"}`
@@ -88,6 +93,12 @@ export function StatusStrip() {
         </div>
         <span className="status-value-tertiary">Z{Math.round(viewState.zoom)}</span>
       </div>
+      {appVersion && (
+        <>
+          <div className="status-divider" />
+          <span className="status-value-tertiary">v{appVersion}</span>
+        </>
+      )}
     </div>
   );
 }
