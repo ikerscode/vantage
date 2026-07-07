@@ -1,0 +1,21 @@
+{
+  "note": "DIAGNOSTIC ONLY: inference service temporarily run with SCORE_THRESHOLD=0.05 (vs production default 0.5) to verify the chip->PNG->HTTP->model->boxes plumbing responds correctly to non-empty detector output. Real true-color-tile.png fetched from Sentinel-2 scene S2B_10SGF_20250619_0_L2A (Fresno-area airport/farmland), fed through the actual detection_pipeline._chip_to_png_bytes + _detect_chip functions. At the production threshold (0.5), zero detections is the honest, expected result on this farmland/airport imagery with a COCO-pretrained model (see RUN_REPORT.md) -- the model's 'train' label at 0.45 confidence on the runway/taxiway is a good illustration of exactly why this is a placeholder, not a tuned overhead-imagery detector.",
+  "detections": [
+    {"box": [0.0, 55.4108772277832, 255.99627685546875, 241.78512573242188], "score": 0.4507836699485779, "label": "train"},
+    {"box": [51.59857177734375, 86.67169952392578, 236.1922149658203, 208.2666778564453], "score": 0.3256898522377014, "label": "train"},
+    {"box": [17.86025619506836, 91.13565826416016, 27.183000564575195, 104.61003875732422], "score": 0.3210890293121338, "label": "car"},
+    {"box": [24.66614532470703, 0.053394775837659836, 39.14118957519531, 9.488232612609863], "score": 0.2764732539653778, "label": "traffic light"},
+    {"box": [105.34341430664062, 91.87281799316406, 117.36093139648438, 113.7325439453125], "score": 0.15607881546020508, "label": "cell phone"},
+    {"box": [19.088592529296875, 86.69664001464844, 30.17574691772461, 104.32919311523438], "score": 0.13440339267253876, "label": "car"},
+    {"box": [114.23983764648438, 114.31122589111328, 220.6982421875, 195.40245056152344], "score": 0.114213727414608, "label": "person"},
+    {"box": [105.05503845214844, 113.28949737548828, 222.97718811035156, 199.15866088867188], "score": 0.1136869341135025, "label": "dog"},
+    {"box": [234.57369995117188, 80.0352554321289, 256.0, 133.2599334716797], "score": 0.10984387248754501, "label": "potted plant"},
+    {"box": [95.17443084716797, 101.58003997802734, 232.9474334716797, 182.30227661132812], "score": 0.09826663881540298, "label": "train"},
+    {"box": [194.7760467529297, 193.7541961669922, 203.0732421875, 216.23904418945312], "score": 0.07095444202423096, "label": "person"},
+    {"box": [97.20048522949219, 112.38825988769531, 231.33560180664062, 211.5863037109375], "score": 0.0670398622751236, "label": "horse"},
+    {"box": [106.85882568359375, 100.26675415039062, 229.34901428222656, 192.09144592285156], "score": 0.06177430599927902, "label": "giraffe"},
+    {"box": [211.4387969970703, 115.20110321044922, 238.3379364013672, 137.30018615722656], "score": 0.06155147776007652, "label": "car"},
+    {"box": [0.0, 47.46227264404297, 254.93795776367188, 245.15577697753906], "score": 0.05807756260037422, "label": "bus"},
+    {"box": [0.5590643286705017, 97.06398010253906, 16.910696029663086, 105.53604888916016], "score": 0.05006640776991844, "label": "car"}
+  ]
+}

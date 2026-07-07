@@ -1,0 +1,2 @@
+data: {"id": "63e2f701-ff5e-4a79-97c4-679b3430915d", "monitor_id": "0a950332-1567-4ee5-b17e-2ceb332cdf32", "aoi_id": "e169dda9-f5ce-4c52-b042-05431410631e", "analysis_result_id": "7f9e9b5f-ec67-4247-b454-65f015693b3e", "metric_value": 0.00804304415353894, "threshold": 0.2, "summary": "Change detected for AOI e169dda9-f5ce-4c52-b042-05431410631e: 290 pixel(s) exceeded NDVI-diff threshold 0.2 between 2025-06-19 and 2026-07-04.", "created_at": "2026-07-07T11:15:13.067074+02:00"}
+

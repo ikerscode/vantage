@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vantage-tiler"
+version = "0.1.0"
+description = "VANTAGE tiler: thin FastAPI wrapper around TiTiler's COG router, dynamic tiles/band-math, no pre-rendering."
+requires-python = ">=3.11"
+dependencies = [
+    "titiler.core~=0.18",
+    "uvicorn[standard]~=0.30",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

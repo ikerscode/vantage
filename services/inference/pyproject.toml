@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vantage-inference"
+version = "0.1.0"
+description = "VANTAGE placeholder object detector: ModelBackend interface over a COCO-pretrained torchvision detector (BSD-licensed; no Ultralytics YOLO)."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi~=0.115",
+    "uvicorn[standard]~=0.30",
+    "pydantic-settings~=2.4",
+    "torch~=2.3",
+    "torchvision~=0.18",
+    "pillow~=10.3",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / frontend (apps/web)
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Celery (apps/api, run locally without a real broker-backed beat schedule store)
+celerybeat-schedule.db
+celerybeat.pid
+
+# Env / secrets
+infra/.env
+.env
+.env.local
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Docker / data volumes bind-mounted locally (none tracked; compose uses named volumes)

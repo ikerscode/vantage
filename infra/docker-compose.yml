@@ -1,0 +1,173 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    env_file: .env
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      # Runs once, automatically, on first init (empty data dir) — creates
+      # vantage_migrate/vantage_app so the app never runs as this bootstrap
+      # superuser. See infra/db-init/01-roles.sql for the verified rationale.
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: provisions the `pgstac` schema (roles, tables, its own migration
+  # history) alongside our `public` schema, which Alembic owns exclusively.
+  # This is the seam a v2 local/air-gapped ImagerySource will read from — v1
+  # app code doesn't query it yet (see apps/api/app/imagery/pgstac.py).
+  pgstac-migrate:
+    image: python:3.11-slim
+    env_file: .env
+    command: >
+      sh -c "pip install --no-cache-dir 'pypgstac[psycopg]~=0.8' &&
+      pypgstac migrate --dsn postgresql://$$POSTGRES_USER:$$POSTGRES_PASSWORD@db:5432/$$POSTGRES_DB"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    env_file: .env
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: creates the private analysis-output bucket. Kept private (no
+  # anonymous/public policy) — the tiler authenticates via the same MinIO
+  # credentials over /vsis3/, it doesn't need public bucket access.
+  minio-init:
+    image: minio/mc:latest
+    env_file: .env
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+      mc mb --ignore-existing local/$$S3_BUCKET_ANALYSIS
+      "
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+
+  # One-shot: alembic upgrade head. A dedicated service (rather than an
+  # api/worker/beat entrypoint script) so three containers never race
+  # `alembic upgrade head` against each other on startup.
+  api-migrate:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    # Overrides .env's DATABASE_URL (vantage_app, DML-only) with the
+    # migration role (vantage_migrate, owns the schema) — the only place in
+    # the whole stack this role is used. Verified: this role can run Alembic
+    # end-to-end without ever touching the bootstrap superuser.
+    environment:
+      DATABASE_URL: postgresql+psycopg://vantage_migrate:changeme-migrate-dev@db:5432/${POSTGRES_DB}
+    command: alembic upgrade head
+    depends_on:
+      db:
+        condition: service_healthy
+      pgstac-migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      api-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  worker:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    command: celery -A app.core.celery_app worker --loglevel=info
+    depends_on:
+      api-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      inference:
+        condition: service_healthy
+
+  beat:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    command: celery -A app.core.celery_app beat --loglevel=info
+    depends_on:
+      api-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  # Dynamic COG tiling only — no pixel pyramids are ever persisted. Reads
+  # public Earth Search COGs via /vsicurl/ and our own MinIO output COGs via
+  # /vsis3/ from the same process (see services/tiler/app/main.py).
+  tiler:
+    build:
+      context: ..
+      dockerfile: services/tiler/Dockerfile
+    env_file: .env
+    ports:
+      - "8001:8000"
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  # Placeholder object detector (torchvision, COCO-pretrained; no Ultralytics
+  # YOLO — see CLAUDE.md licensing constraints). Called synchronously from the
+  # Celery worker right after a successful change-detection analysis; not
+  # exposed externally, only worker/api reach it over the compose network.
+  inference:
+    build:
+      context: ..
+      dockerfile: services/inference/Dockerfile
+    env_file: .env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # NOTE: `web` (apps/web) is intentionally not defined here yet — it can't be
+  # built/run in this environment (no Node.js), so adding a compose stanza for
+  # it now would be a half-wired seam. Run it with `npm install && npm run dev`
+  # directly (see apps/web/.env.example for VITE_API_BASE_URL/VITE_TILER_BASE_URL).
+
+volumes:
+  db_data:
+  minio_data:

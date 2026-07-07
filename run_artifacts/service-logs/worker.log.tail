@@ -1,0 +1,60 @@
+[2026-07-07 02:51:13,043: INFO/MainProcess] Task app.tasks.monitor_sweep.sweep_monitors[cc4aee3c-f4de-4cb0-8189-abc33b6e34ce] received
+[2026-07-07 02:51:13,045: INFO/ForkPoolWorker-7] Task app.tasks.monitor_sweep.sweep_monitors[cc4aee3c-f4de-4cb0-8189-abc33b6e34ce] succeeded in 0.0016442489977634978s: None
+[2026-07-07 02:56:13,042: INFO/MainProcess] Task app.tasks.monitor_sweep.sweep_monitors[c3510e68-1747-4244-89eb-233fe217d96b] received
+[2026-07-07 02:56:13,044: INFO/ForkPoolWorker-7] Task app.tasks.monitor_sweep.sweep_monitors[c3510e68-1747-4244-89eb-233fe217d96b] succeeded in 0.0015715010013082065s: None
+[2026-07-07 03:01:13,045: INFO/MainProcess] Task app.tasks.monitor_sweep.sweep_monitors[a50727f8-ad4b-4b0b-9a6c-d5d0567fb0bf] received
+[2026-07-07 03:01:13,049: INFO/ForkPoolWorker-7] Task app.tasks.monitor_sweep.sweep_monitors[a50727f8-ad4b-4b0b-9a6c-d5d0567fb0bf] succeeded in 0.0030962019991420675s: None
+[2026-07-07 03:06:13,043: INFO/MainProcess] Task app.tasks.monitor_sweep.sweep_monitors[22286d96-70c0-43ef-afc4-41a5d6761593] received
+[2026-07-07 03:06:13,047: INFO/ForkPoolWorker-7] Task app.tasks.monitor_sweep.sweep_monitors[22286d96-70c0-43ef-afc4-41a5d6761593] succeeded in 0.0025379790022270754s: None
+[2026-07-07 03:11:13,041: INFO/MainProcess] Task app.tasks.monitor_sweep.sweep_monitors[39db4352-9550-4a2b-9f9e-174c2816c73b] received
+[2026-07-07 03:11:13,044: INFO/ForkPoolWorker-7] Task app.tasks.monitor_sweep.sweep_monitors[39db4352-9550-4a2b-9f9e-174c2816c73b] succeeded in 0.002655475000210572s: None
+[2026-07-07 03:16:13,041: INFO/MainProcess] Task app.tasks.monitor_sweep.sweep_monitors[feba23f3-ce4b-4514-ae5a-5928cdf8057f] received
+[2026-07-07 03:16:13,044: INFO/ForkPoolWorker-7] Task app.tasks.monitor_sweep.sweep_monitors[feba23f3-ce4b-4514-ae5a-5928cdf8057f] succeeded in 0.002888827999413479s: None
+[2026-07-07 03:21:13,041: INFO/MainProcess] Task app.tasks.monitor_sweep.sweep_monitors[a02eab75-7d1b-4738-b8f7-7d4ea939d063] received
+[2026-07-07 03:21:13,046: INFO/ForkPoolWorker-7] Task app.tasks.monitor_sweep.sweep_monitors[a02eab75-7d1b-4738-b8f7-7d4ea939d063] succeeded in 0.0039275810013350565s: None
+[2026-07-07 03:26:13,042: INFO/MainProcess] Task app.tasks.monitor_sweep.sweep_monitors[e36adcdf-5346-499c-983e-60f7424b747c] received
+[2026-07-07 03:26:13,045: INFO/ForkPoolWorker-7] Task app.tasks.monitor_sweep.sweep_monitors[e36adcdf-5346-499c-983e-60f7424b747c] succeeded in 0.002763963999314001s: None
+[2026-07-07 11:03:20,886: INFO/MainProcess] Task app.tasks.monitor_sweep.sweep_monitors[5fead488-e503-4663-b7a5-9b52421bdeb7] received
+[2026-07-07 11:03:20,891: INFO/ForkPoolWorker-7] Task app.tasks.monitor_sweep.sweep_monitors[5fead488-e503-4663-b7a5-9b52421bdeb7] succeeded in 0.003709315999003593s: None
+[2026-07-07 11:08:20,880: INFO/MainProcess] Task app.tasks.monitor_sweep.sweep_monitors[b6512e74-25a7-45db-b66c-b9c62b69adc1] received
+[2026-07-07 11:08:20,882: INFO/ForkPoolWorker-7] Task app.tasks.monitor_sweep.sweep_monitors[b6512e74-25a7-45db-b66c-b9c62b69adc1] succeeded in 0.0012068510004610289s: None
+[2026-07-07 11:13:20,878: INFO/MainProcess] Task app.tasks.monitor_sweep.sweep_monitors[329f0621-5207-4be8-bcb1-8c062cb1b07f] received
+[2026-07-07 11:13:20,880: INFO/ForkPoolWorker-7] Task app.tasks.monitor_sweep.sweep_monitors[329f0621-5207-4be8-bcb1-8c062cb1b07f] succeeded in 0.0015232699988700915s: None
+[2026-07-07 11:18:20,878: INFO/MainProcess] Task app.tasks.monitor_sweep.sweep_monitors[b3b95abc-30d4-46de-b3b8-d11b54daf1e8] received
+[2026-07-07 11:18:29,068: INFO/ForkPoolWorker-7] Task app.tasks.monitor_sweep.sweep_monitors[b3b95abc-30d4-46de-b3b8-d11b54daf1e8] succeeded in 8.18836621200171s: None
+[2026-07-07 11:18:42,160: INFO/MainProcess] Task app.tasks.change_detection.run_change_detection[7f35acf9-ac61-46de-80cd-4db8adff19b2] received
+[2026-07-07 11:18:51,457: WARNING/ForkPoolWorker-7] /home/liam/Documents/Satellite/apps/api/app/services/cog_writer.py:28: RasterioDeprecationWarning: Source dataset should be opened in read-only mode. Use of datasets opened in modes other than 'r' will be disallowed in a future version.
+  cog_translate(src_dataset, dst_mem.name, dst_profile, in_memory=True, quiet=True)
+
+[2026-07-07 11:18:56,407: INFO/ForkPoolWorker-7] HTTP Request: POST http://localhost:8002/detect "HTTP/1.1 200 OK"
+[2026-07-07 11:18:57,119: INFO/ForkPoolWorker-7] HTTP Request: POST http://localhost:8002/detect "HTTP/1.1 200 OK"
+[2026-07-07 11:18:57,122: INFO/ForkPoolWorker-7] Task app.tasks.change_detection.run_change_detection[7f35acf9-ac61-46de-80cd-4db8adff19b2] succeeded in 14.960840957999608s: None
+[2026-07-07 11:23:20,878: INFO/MainProcess] Task app.tasks.monitor_sweep.sweep_monitors[333ba833-f397-4f11-866a-68e938769304] received
+[2026-07-07 11:23:29,264: INFO/MainProcess] Task app.tasks.change_detection.run_change_detection[424af5f6-acb4-4961-a4c2-495943bb7a67] received
+[2026-07-07 11:23:30,619: INFO/ForkPoolWorker-7] Task app.tasks.monitor_sweep.sweep_monitors[333ba833-f397-4f11-866a-68e938769304] succeeded in 9.741087346003042s: None
+[2026-07-07 11:23:40,245: WARNING/ForkPoolWorker-8] /home/liam/Documents/Satellite/apps/api/app/services/cog_writer.py:28: RasterioDeprecationWarning: Source dataset should be opened in read-only mode. Use of datasets opened in modes other than 'r' will be disallowed in a future version.
+  cog_translate(src_dataset, dst_mem.name, dst_profile, in_memory=True, quiet=True)
+
+[2026-07-07 11:23:44,787: INFO/ForkPoolWorker-8] HTTP Request: POST http://localhost:8002/detect "HTTP/1.1 200 OK"
+[2026-07-07 11:23:45,476: INFO/ForkPoolWorker-8] HTTP Request: POST http://localhost:8002/detect "HTTP/1.1 200 OK"
+[2026-07-07 11:23:45,507: INFO/ForkPoolWorker-8] Task app.tasks.change_detection.run_change_detection[424af5f6-acb4-4961-a4c2-495943bb7a67] succeeded in 16.195113322002726s: None
+[2026-07-07 11:28:20,878: INFO/MainProcess] Task app.tasks.monitor_sweep.sweep_monitors[d031a709-b3f1-4ce5-9691-fac6f80030c5] received
+[2026-07-07 11:28:33,796: INFO/ForkPoolWorker-7] Task app.tasks.monitor_sweep.sweep_monitors[d031a709-b3f1-4ce5-9691-fac6f80030c5] succeeded in 12.917596039998898s: None
+[2026-07-07 11:31:37,740: INFO/MainProcess] Task app.tasks.change_detection.run_change_detection[c3d5deeb-2630-4270-a5b2-dee0a85ff278] received
+[2026-07-07 11:31:39,900: WARNING/ForkPoolWorker-7] /home/liam/Documents/Satellite/apps/api/app/services/cog_writer.py:28: RasterioDeprecationWarning: Source dataset should be opened in read-only mode. Use of datasets opened in modes other than 'r' will be disallowed in a future version.
+  cog_translate(src_dataset, dst_mem.name, dst_profile, in_memory=True, quiet=True)
+
+[2026-07-07 11:31:42,193: INFO/ForkPoolWorker-7] HTTP Request: POST http://localhost:8002/detect "HTTP/1.1 200 OK"
+[2026-07-07 11:31:43,008: INFO/ForkPoolWorker-7] HTTP Request: POST http://localhost:8002/detect "HTTP/1.1 200 OK"
+[2026-07-07 11:31:43,011: INFO/ForkPoolWorker-7] Task app.tasks.change_detection.run_change_detection[c3d5deeb-2630-4270-a5b2-dee0a85ff278] succeeded in 5.269710034997843s: None
+[2026-07-07 11:33:20,878: INFO/MainProcess] Task app.tasks.monitor_sweep.sweep_monitors[90dfe780-dcf4-4c60-854d-7c85726ce25b] received
+[2026-07-07 11:33:38,451: INFO/ForkPoolWorker-7] Task app.tasks.monitor_sweep.sweep_monitors[90dfe780-dcf4-4c60-854d-7c85726ce25b] succeeded in 17.57185065199883s: None
+[2026-07-07 11:33:42,101: INFO/MainProcess] Task app.tasks.change_detection.run_change_detection[e47921d7-bc3f-4093-b015-4b0d754c5766] received
+[2026-07-07 11:33:44,376: WARNING/ForkPoolWorker-7] /home/liam/Documents/Satellite/apps/api/app/services/cog_writer.py:28: RasterioDeprecationWarning: Source dataset should be opened in read-only mode. Use of datasets opened in modes other than 'r' will be disallowed in a future version.
+  cog_translate(src_dataset, dst_mem.name, dst_profile, in_memory=True, quiet=True)
+
+[2026-07-07 11:33:47,820: INFO/ForkPoolWorker-7] HTTP Request: POST http://localhost:8002/detect "HTTP/1.1 200 OK"
+[2026-07-07 11:33:48,994: INFO/ForkPoolWorker-7] HTTP Request: POST http://localhost:8002/detect "HTTP/1.1 200 OK"
+[2026-07-07 11:33:48,996: INFO/ForkPoolWorker-7] Task app.tasks.change_detection.run_change_detection[e47921d7-bc3f-4093-b015-4b0d754c5766] succeeded in 6.894824560000416s: None
+[2026-07-07 11:38:20,878: INFO/MainProcess] Task app.tasks.monitor_sweep.sweep_monitors[2f5a7742-3e4c-4398-a53d-f0fdfa57bc0d] received
+[2026-07-07 11:38:37,360: INFO/ForkPoolWorker-7] Task app.tasks.monitor_sweep.sweep_monitors[2f5a7742-3e4c-4398-a53d-f0fdfa57bc0d] succeeded in 16.4808869160006s: None
