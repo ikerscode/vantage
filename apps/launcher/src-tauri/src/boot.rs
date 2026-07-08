@@ -91,10 +91,25 @@ pub fn run(app: AppHandle, data_dir: PathBuf, api_port: u16, tiler_port: u16, db
     }
 
     emit_progress(&app, "loading offline images…");
-    let tarball_path = resource_dir.join("infra").join("vantage-images-1.0.0.tar");
-    match images::ensure_images_loaded(&runtime, &tarball_path, &data_dir) {
+    // Checked in order (BRIEF v1.6 — see OFFLINE_BUNDLE_REPORT.md): the
+    // bundled-resource path is kept as a candidate in case a future build
+    // ever does embed the tarball, but the real path today is the
+    // operator-provided one — the tarball is ~6.6 GiB, over 3x GitHub's
+    // hard 2 GiB release-asset cap, so it ships as a separate chunked
+    // download the operator reassembles into VANTAGE's data directory
+    // (see docs/AIRGAP.md), not inside the installer.
+    let tarball_candidates = vec![
+        resource_dir.join("infra").join("vantage-images-1.0.0.tar"),
+        data_dir.join("vantage-images-1.0.0.tar"),
+    ];
+    match images::ensure_images_loaded(&runtime, &tarball_candidates, &data_dir) {
         Ok(true) => emit_progress(&app, "loaded images from the offline bundle"),
-        Ok(false) => emit_progress(&app, "no offline image bundle to load (already loaded, or using a registry)"),
+        Ok(false) => emit_progress(
+            &app,
+            "no offline image bundle found — see docs/AIRGAP.md to download one \
+             (required for a fully offline install; these images are never pulled \
+             from a registry)",
+        ),
         Err(e) => emit_progress(&app, format!("warning: couldn't load offline images: {e}")),
     }
 

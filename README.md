@@ -6,7 +6,7 @@ See `CLAUDE.md` for the always-on architectural context (invariants, conventions
 
 ## Install the app vs. run from source
 
-**Most users**: download a per-OS installer and run it — no dev environment needed. See **[INSTALL.md](INSTALL.md)**, and **[docs/AIRGAP.md](docs/AIRGAP.md)** for fully-offline/air-gapped deployment. The installer bundles a desktop launcher (Tauri) that brings up the same container stack described below, plus bundled demo Sentinel-2 imagery so the app works immediately with no internet.
+**Most users**: download a per-OS installer and run it — no dev environment needed. See **[INSTALL.md](INSTALL.md)**, and **[docs/AIRGAP.md](docs/AIRGAP.md)** for fully-offline/air-gapped deployment (two downloads, not one — the installer itself is small; the ~6.6 GiB container-image bundle is a separate chunked download from the same GitHub Release, see `OFFLINE_BUNDLE_REPORT.md`). The installer bundles a desktop launcher (Tauri) that brings up the same container stack described below, plus bundled demo Sentinel-2 imagery so that once the image bundle is loaded, the app works with no internet at all.
 
 **Contributors / anyone modifying the code**: keep reading — this section is the source-build path.
 

@@ -1,10 +1,27 @@
 # Air-gapped / offline deployment
 
-VANTAGE's core invariant (see `CLAUDE.md`) is that it never has a hard runtime dependency on external SaaS. The packaged desktop app takes this further: the **default** installer configuration works with networking disabled entirely, from first launch.
+VANTAGE's core invariant (see `CLAUDE.md`) is that it never has a hard runtime dependency on external SaaS. The packaged desktop app takes this further: once the container images are loaded (see below), it works with networking disabled entirely, from first launch.
+
+## Two downloads, not one
+
+The installer (`.deb`/`.AppImage`/`.dmg`/`.msi`) does **not** embed the container images — the real, measured tarball is ~6.6 GiB (see `OFFLINE_BUNDLE_REPORT.md`), over 3x GitHub's hard 2 GiB release-asset cap, and embedding it would balloon every installer to match. This is normal for air-gapped software distribution, not a shortcut: you get **two things from the same GitHub Release**:
+
+1. The installer for your OS — small, fast to download, installs normally.
+2. `vantage-images-1.0.0.tar.part-*` (several chunks) + `vantage-images-1.0.0.tar.sha256` — the offline container-image bundle. On a **networked** machine:
+
+   ```bash
+   cat vantage-images-1.0.0.tar.part-* > vantage-images-1.0.0.tar
+   sha256sum -c vantage-images-1.0.0.tar.sha256
+   ```
+
+   Then carry the reassembled `vantage-images-1.0.0.tar` to the air-gapped target via your approved media (USB, etc.) and place it in VANTAGE's data directory (see `INSTALL.md`'s table — e.g. `~/.local/share/VANTAGE` on Linux) **before first launch**. `apps/launcher/launcher-core/src/images.rs` checks that location automatically and loads it (`docker`/`podman load`, not a registry pull) on next start — see `scripts/package/save-images.sh`/`split-images.sh`.
+
+Without this step, the packaged app cannot start at all: these images are never pushed to any registry (see `scripts/package/build-images.sh`), so `docker compose up` has nothing to pull if the images were never loaded.
 
 ## What "offline by default" actually means here
 
-- The installer bundles the container images themselves (`docker`/`podman load`, not a registry pull) — see `scripts/package/save-images.sh` / `apps/launcher/launcher-core/src/images.rs`.
+Once the image bundle above is loaded, everything else needs zero network access, by design:
+
 - The placeholder ML detector's model weights are baked into its image at *build* time (`services/inference/Dockerfile`) — the running container never fetches them.
 - Fonts (IBM Plex, self-hosted via `@fontsource`), the map style, and all other frontend assets are bundled into the app — no CDN fetch, ever. This is enforced two ways, not just by convention: a `Content-Security-Policy` baked into the production build (`apps/web/vite.config.ts`) restricts `connect-src`/`script-src`/`font-src` to `'self'` plus `localhost`, and Tauri's own `app.security.csp` in `apps/launcher/src-tauri/tauri.conf.json` applies the same restriction at the webview level.
 - Real Sentinel-2 imagery — two real scenes, pre-fetched and cropped to a fixed demo AOI with genuine NDVI contrast between dates — ships inside the installer (`infra/demo-data/`, ~54MB). A dedicated `ImagerySource` implementation (`apps/api/app/imagery/static_catalog.py`, `IMAGERY_SOURCE=static_catalog`) reads these local files; **the actual demo AOI/analysis you see on first launch is computed by the real change-detection pipeline against this local data**, not a canned screenshot. See `PACKAGE_REPORT.md` for how this was verified.
@@ -24,7 +41,7 @@ Switching modes: edit `IMAGERY_SOURCE` in `${data_dir}/config/.env` and restart 
 
 ## Verifying no external calls yourself
 
-Don't take the bullet points above on faith — the fastest real check:
+Don't take the bullet points above on faith — the fastest real check (after the image bundle from "Two downloads, not one" above has already been loaded at least once — that one step does need to have happened first, on some machine, at some point):
 
 ```bash
 # with the app already running and healthy:
@@ -33,7 +50,7 @@ sudo iptables -I OUTPUT -p tcp --dport 443 -j REJECT   # or just disconnect netw
 sudo iptables -D OUTPUT -p tcp --dport 443 -j REJECT    # restore
 ```
 
-If you saw no failed requests in the app (everything should work identically with networking down, since default mode never needs it), that's your proof — not this document's word for it. See `PACKAGE_REPORT.md` for what level of this was actually exercised during development versus left for you to confirm on your own machine.
+If you saw no failed requests in the app (everything should work identically with networking down, since default mode never needs it), that's your proof — not this document's word for it. See `PACKAGE_REPORT.md` and `OFFLINE_BUNDLE_REPORT.md` for what level of this was actually exercised during development versus left for you to confirm on your own machine.
 
 ## Re-pointing at a fully internal deployment
 

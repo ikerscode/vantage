@@ -2,7 +2,9 @@
 
 This covers installing the packaged desktop app. If you're modifying the code, see the README's source-build path instead.
 
-**Read this first**: VANTAGE is a heavy, workstation-class app, not a lightweight utility — the installer bundles a full container stack (PostGIS, an object store, a tiling service, an ML inference service) plus demo satellite imagery. Budget **8GB+ RAM**, **~10GB+ disk**, and a multi-GB download. It also needs a container runtime (Docker or Podman) — the launcher detects this and guides you through installing one if it's missing.
+**Read this first**: VANTAGE is a heavy, workstation-class app, not a lightweight utility. Budget **8GB+ RAM** and **~10GB+ disk**. It also needs a container runtime (Docker or Podman) — the launcher detects this and guides you through installing one if it's missing.
+
+**Two downloads, not one**: the installer itself is small (see sizes below), but it does **not** include the container images (PostGIS, an object store, a tiling service, an ML inference service) — that's a real, measured ~6.6 GiB, over 3x GitHub's per-file release-asset cap (see `OFFLINE_BUNDLE_REPORT.md`). You also need the `vantage-images-1.0.0.tar.part-*` chunks from the same GitHub Release — see [docs/AIRGAP.md](docs/AIRGAP.md) for the one-time reassemble-and-place step. Without it, the app cannot start (these images are never pulled from a registry).
 
 **No phone-home**: nothing in this app calls out to any external service except imagery sources you explicitly configure (and by default, it's configured to use only bundled offline demo imagery — see [docs/AIRGAP.md](docs/AIRGAP.md)). No telemetry, no analytics, no update pings, no crash reporting that leaves your machine.
 
@@ -46,7 +48,7 @@ Run the installer. **Signing note**: same caveat as macOS — an unsigned `.msi`
 
 1. VANTAGE opens to a splash screen and checks for a container runtime. If none is found, it tells you exactly what to install (see the per-OS notes above) rather than failing silently.
 2. It generates unique DB/object-store/auth secrets for this install (never shared across installs, never shipped as defaults — see `PACKAGE_REPORT.md` §9).
-3. It loads the bundled container images (no registry pull needed — see `docs/AIRGAP.md`) and starts the stack, showing honest progress ("starting database… loading tiler…").
+3. It loads the container images from the offline bundle you placed in the data directory (no registry pull, ever — see `docs/AIRGAP.md` for the one-time download-and-place step this depends on) and starts the stack, showing honest progress ("starting database… loading tiler…").
 4. Once every service reports healthy, the mission-console UI opens — with a bundled demo AOI already showing real Sentinel-2 imagery, even with no internet connection.
 
 Where things live:
@@ -83,18 +85,25 @@ This is what a maintainer runs to produce the artifacts above — not something 
 # 1. Build the frontend (bundled into the launcher, not run as a container)
 cd apps/web && npm install && npm run build && cd ../..
 
-# 2. Build + tag the container images, then bundle them for offline install
-VANTAGE_VERSION=1.0.0 ./scripts/package/build-images.sh
-VANTAGE_VERSION=1.0.0 ./scripts/package/save-images.sh
-# -> writes infra/vantage-images-1.0.0.tar; add it to
-#    apps/launcher/src-tauri/tauri.conf.json's bundle.resources before the
-#    next step, so `tauri build` actually ships it.
-
-# 3. Build the per-OS installer (run natively on each target OS — Tauri
+# 2. Build the per-OS installer (run natively on each target OS — Tauri
 #    does not cross-compile installers)
 cd apps/launcher
 npm install
 npm run build   # -> src-tauri/target/release/bundle/{deb,appimage,msi,dmg}/...
+cd ../..
+
+# 3. Build + tag the container images, then bundle them for offline
+#    distribution. NOT added to tauri.conf.json's bundle.resources — the
+#    real tarball is ~6.6 GiB, over 3x GitHub's per-file release-asset cap
+#    (see OFFLINE_BUNDLE_REPORT.md), so it ships as separate chunked
+#    downloads next to the installer, not embedded inside it.
+VANTAGE_VERSION=1.0.0 ./scripts/package/build-images.sh
+VANTAGE_VERSION=1.0.0 ./scripts/package/save-images.sh
+VANTAGE_VERSION=1.0.0 ./scripts/package/split-images.sh
+# -> writes infra/vantage-images-1.0.0.tar.part-* + a .sha256 file.
+#    Distribute the installer from step 2 AND every .tar.part-*/.sha256
+#    file from this step together (see docs/AIRGAP.md for what the
+#    end user does with them).
 ```
 
 Linux build machines need (once, via your package manager — not needed at runtime by an end user, only to *compile* the launcher):

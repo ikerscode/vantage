@@ -116,19 +116,38 @@ jobs:
         working-directory: infra
         run: docker compose -f docker-compose.yml down -v
 
-  # BRIEF v1.6, exploratory pass: build-images.sh/save-images.sh have never
-  # been run for real (no container runtime in the dev sandbox — see
-  # PACKAGE_REPORT.md §4). This job's only job is to actually run them and
-  # report the genuine tarball size, so the shipping strategy below can be
-  # picked from a real number instead of a guess. Independent of test/
-  # frontend/security-scan so it can run in parallel and report back fast.
-  measure-offline-bundle:
+  # BRIEF v1.6: launcher-core's Rust unit tests (images.rs's tarball
+  # path-selection, secrets/config/health/seed logic, etc.) had NEVER run
+  # in CI — only referenced for rust-cache warmup, never actually invoked.
+  # It's deliberately dependency-free of the `tauri` crate specifically so
+  # it builds and tests on any machine with a Rust toolchain (see its own
+  # module docs) — no GTK/webkit system packages needed, so this doesn't
+  # need to wait for or duplicate across build-desktop's 3-platform matrix.
+  launcher-core-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/launcher/launcher-core -> target
+      - working-directory: apps/launcher/launcher-core
+        run: cargo test
 
-      - name: Disk space before
-        run: df -h /
+  # BRIEF v1.6: build-images.sh/save-images.sh/split-images.sh had never
+  # been run for real before this brief (no container runtime in the dev
+  # sandbox — see PACKAGE_REPORT.md §4) — a real first run found them not
+  # even executable (missing +x, exit 126). This job keeps them exercised
+  # on every push so that regression stays impossible to miss again,
+  # without redoing the one-off empirical work OFFLINE_BUNDLE_REPORT.md
+  # already settled (the real tarball size, and this repo's real
+  # workflow-artifact size ceiling) on every single push. The actual
+  # release-asset upload of the split chunks lives in release.yml, gated
+  # on a real tag, not here.
+  offline-bundle-regression-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       # Standard runners ship with a lot of preinstalled toolchains we don't
       # need (Android SDK, .NET, GHC, etc.) — free that up before building
@@ -138,36 +157,24 @@ jobs:
           sudo rm -rf /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
             /usr/share/dotnet /usr/local/share/powershell /usr/local/share/chromium \
             /usr/local/lib/node_modules 2>/dev/null || true
-          df -h /
 
       - name: Build every image for real (scripts/package/build-images.sh)
         run: VANTAGE_VERSION=1.0.0 ./scripts/package/build-images.sh
 
-      - name: Disk space after build
-        run: df -h /
+      - name: Per-image size breakdown (informational)
+        run: docker images --format "table {{.Repository}}:{{.Tag}}\t{{.Size}}"
 
-      - name: Save every image into one offline tarball for real (scripts/package/save-images.sh)
+      - name: Save every image into one offline tarball (scripts/package/save-images.sh)
         run: VANTAGE_VERSION=1.0.0 ./scripts/package/save-images.sh
 
-      - name: Disk space after save
-        run: df -h /
+      - name: Split into release-asset-sized chunks (scripts/package/split-images.sh)
+        run: VANTAGE_VERSION=1.0.0 ./scripts/package/split-images.sh
 
       - name: Report the genuine measured size
         run: |
-          ls -la infra/vantage-images-1.0.0.tar
           du -h infra/vantage-images-1.0.0.tar
           sha256sum infra/vantage-images-1.0.0.tar
-
-      # Empirical test of this exact repo's real workflow-artifact size
-      # ceiling (BRIEF v1.6 — "confirm the current numbers rather than
-      # assume") rather than trusting secondhand docs about public-repo
-      # storage quotas.
-      - name: Attempt to upload as a workflow artifact (measures the real ceiling for this repo)
-        uses: actions/upload-artifact@v4
-        with:
-          name: vantage-offline-images-measurement
-          path: infra/vantage-images-1.0.0.tar
-          retention-days: 1
+          ls -la infra/vantage-images-1.0.0.tar.part-*
 
   frontend:
     runs-on: ubuntu-latest
