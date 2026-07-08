@@ -271,4 +271,14 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         with:
           projectPath: apps/launcher
-          uploadWorkflowArtifacts: true
+
+      # `uploadWorkflowArtifacts` is NOT a real tauri-action@v0 input (found
+      # for real in CI, BRIEF v1.5 — it was silently ignored: a warning, not
+      # a build failure, so this would have shipped with zero artifacts ever
+      # produced). Upload the real bundle output explicitly instead.
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vantage-launcher-${{ matrix.platform }}
+          path: apps/launcher/src-tauri/target/release/bundle/**
+          if-no-files-found: error
