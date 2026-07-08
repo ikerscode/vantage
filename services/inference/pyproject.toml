@@ -11,8 +11,22 @@ dependencies = [
     "fastapi~=0.115",
     "uvicorn[standard]~=0.30",
     "pydantic-settings~=2.4",
-    "torch~=2.3",
-    "torchvision~=0.18",
+    # Exact-pinned to the +cpu build, not a ~= range (BRIEF v1.7): a range
+    # constraint against BOTH the default PyPI index and PyTorch's CPU
+    # wheel index is ambiguous — PEP 440 version comparison prefers a
+    # build with no local segment (PyPI's CUDA-bundled default) over the
+    # same or even a newer public version WITH a +cpu local segment, so
+    # --index-url/--extra-index-url priority alone doesn't reliably keep
+    # the resolver off the CUDA build (confirmed empirically: it kept
+    # resolving to plain torch==2.12.1, pulling in the full CUDA runtime,
+    # even with the CPU index listed first). An exact pin on the +cpu
+    # version removes the ambiguity entirely — only that one build
+    # satisfies `==`, and it only exists on the CPU index. This service is
+    # CPU-only by design (services/inference/Dockerfile never installs a
+    # GPU runtime); GPU-readiness for a real v2 model is a deployment/
+    # runtime concern, not a reason to bundle an unused CUDA runtime here.
+    "torch==2.13.0+cpu",
+    "torchvision==0.28.0+cpu",
     "pillow~=12.2",  # 10.4.0 had 6 known CVEs (pip-audit, CI security-scan job) — 12.2.0+ fixes all of them
 ]
 
