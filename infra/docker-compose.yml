@@ -128,6 +128,12 @@ services:
     # exposure, and that's what this binds to 127.0.0.1.
     ports:
       - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
     depends_on:
       api-migrate:
         condition: service_completed_successfully
@@ -179,6 +185,12 @@ services:
     env_file: .env
     ports:
       - "127.0.0.1:8001:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
     depends_on:
       minio:
         condition: service_healthy

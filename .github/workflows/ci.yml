@@ -1,0 +1,261 @@
+name: CI
+
+# BRIEF v1.5: the first genuine, continuous, non-synthetic proof this stack
+# runs — real Dockerfile builds, a real docker compose stack, scripts/smoke.sh
+# against live Sentinel-2, and (build-desktop) the first real compile of the
+# Tauri launcher this project has ever produced, on real Linux/macOS/Windows
+# runners with root and a real Docker daemon, none of which the development
+# sandbox this codebase was built in has ever had. See RECONCILIATION_REPORT.md
+# and CI_REPORT.md.
+on:
+  push:
+    branches: [main]
+    tags: ["app-v*"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
+jobs:
+  # The hero-slice proof: real Dockerfile builds (every one of them changed
+  # by v1.4's non-root/hash-pinned-lockfile hardening, never actually built
+  # by a container runtime until this job exists), a real docker compose
+  # stack, and scripts/smoke.sh against live Sentinel-2 — continuously, on
+  # every push, not a one-off manual sandbox run.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: packages/geo — real unit test suite (NDVI, cloud masking, diff, transforms)
+        run: |
+          python -m venv packages/geo/.venv
+          packages/geo/.venv/bin/pip install --quiet -e "packages/geo[dev]"
+          packages/geo/.venv/bin/python -m pytest packages/geo/tests/ -v
+
+      - name: apps/api — real unit test suite (fail-closed secret validation, SEC-04)
+        run: |
+          python -m venv apps/api/.venv
+          apps/api/.venv/bin/pip install --quiet -e packages/geo
+          apps/api/.venv/bin/pip install --quiet -e "apps/api[dev]"
+          apps/api/.venv/bin/python -m pytest apps/api/tests/ -v
+
+      - name: services/tiler — real unit test suite (SSRF hardening, SEC-01)
+        run: |
+          python -m venv services/tiler/.venv
+          services/tiler/.venv/bin/pip install --quiet -e "services/tiler[dev]"
+          services/tiler/.venv/bin/python -m pytest services/tiler/tests/ -v
+
+      - name: Generate real per-install secrets (same script a real first run uses)
+        run: python3 scripts/generate_dev_secrets.py
+
+      - name: Load generated env into subsequent steps
+        run: |
+          python3 -c "
+          import shlex
+          with open('infra/.env') as f:
+              for line in f:
+                  line = line.strip()
+                  if not line or line.startswith('#') or '=' not in line:
+                      continue
+                  key, _, value = line.partition('=')
+                  print(f'{key}={value}')
+          " >> "$GITHUB_ENV"
+
+      - name: Bring up the real stack — real Dockerfile builds, real Postgres/Redis/MinIO/api/worker/beat/tiler/inference
+        working-directory: infra
+        run: docker compose -f docker-compose.yml up -d --build --wait --wait-timeout 900
+
+      - name: Show what's actually running
+        if: always()
+        working-directory: infra
+        run: docker compose -f docker-compose.yml ps -a
+
+      - name: Run scripts/smoke.sh against live Sentinel-2 (real Earth Search, real STAC, real tiles, real change-detection)
+        env:
+          API_BASE_URL: http://localhost:8000
+          TILER_BASE_URL: http://localhost:8001
+          PYTHON_BIN: ${{ github.workspace }}/apps/api/.venv/bin/python
+          PSQL_DSN: postgresql://vantage:${{ env.POSTGRES_PASSWORD }}@localhost:5432/vantage
+        run: ./scripts/smoke.sh
+
+      - name: Dump service logs (only runs on failure, for diagnosis)
+        if: failure()
+        working-directory: infra
+        run: docker compose -f docker-compose.yml logs --no-color
+
+      - name: Tear down
+        if: always()
+        working-directory: infra
+        run: docker compose -f docker-compose.yml down -v
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - working-directory: apps/web
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: apps/web
+        run: npx tsc -b --noEmit
+
+      - name: Production build (self-hosted fonts, CSP injection, runtime-config — BRIEF v1.4 SEC-05)
+        working-directory: apps/web
+        run: npm run build
+
+      - name: npm audit — confirms the esbuild/Vite dev-server advisory (BRIEF v1.4 SEC-11) stays fixed
+        working-directory: apps/web
+        run: npm audit --audit-level=moderate
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks scans history, not just the working tree
+
+      - name: Weapons-boundary merge gate (CLAUDE.md §1) — automated, not just a manual check
+        run: ./scripts/check_weapons_boundary.sh
+
+      - name: gitleaks (secret scanning)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: pip-audit — hash-pinned lockfiles (BRIEF v1.4 SEC-07)
+        run: |
+          pip install --quiet pip-audit
+          echo "::group::apps/api"
+          pip-audit -r apps/api/requirements.lock.txt
+          echo "::endgroup::"
+          echo "::group::services/tiler"
+          pip-audit -r services/tiler/requirements.lock.txt
+          echo "::endgroup::"
+          echo "::group::services/inference"
+          pip-audit -r services/inference/requirements.lock.txt
+          echo "::endgroup::"
+          echo "::group::infra/pgstac-migrate"
+          pip-audit -r infra/pgstac-migrate/requirements.lock.txt
+          echo "::endgroup::"
+          # packages/geo has no separate lockfile — its only two dependencies
+          # (numpy, rasterio) are already pinned and audited as part of
+          # apps/api's lockfile (apps/api installs packages/geo as a local
+          # path dependency), confirmed by:
+          #   grep -c '^numpy==\|^rasterio==' apps/api/requirements.lock.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: npm audit (frontend) — also gated here, not just in the frontend job
+        working-directory: apps/web
+        run: npm ci && npm audit --audit-level=moderate
+
+  # First real compile of the Tauri launcher this project has ever produced
+  # — the development sandbox had no root, no GTK dev headers, and no
+  # macOS/Windows hardware (see PACKAGE_REPORT.md's "Environment reality").
+  # GitHub-hosted runners have all three.
+  build-desktop:
+    needs: [test, frontend, security-scan]
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-22.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reconciled against the 5 packages found empirically in the v1.3
+      # sandbox pass (PACKAGE_REPORT.md: libglib2.0-dev, libgtk-3-dev,
+      # libwebkit2gtk-4.1-dev, librsvg2-dev, libayatana-appindicator3-dev —
+      # everything `cargo check` asked for before hitting the root-access
+      # wall) plus patchelf, which that pass never reached (it's needed at
+      # the AppImage *bundling* step, after compilation, which the sandbox
+      # never got to). Union of both lists, not a re-guess.
+      - name: Install Linux system dependencies for Tauri
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libglib2.0-dev \
+            patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            apps/launcher/src-tauri -> target
+            apps/launcher/launcher-core -> target
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Build the frontend (bundled into the launcher's webview, not run as a container)
+        working-directory: apps/web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install the launcher's Tauri CLI
+        working-directory: apps/launcher
+        run: npm ci
+
+      # Signing (SEC per BRIEF v1.5 Phase 1's "sign" step): wired, not
+      # blocking. tauri-action / the underlying Tauri CLI signs
+      # automatically IF these env vars are non-empty (standard Tauri CI
+      # convention) and silently produces an unsigned bundle if they're
+      # unset — Gatekeeper/SmartScreen will warn on the unsigned artifact,
+      # exactly as flagged in PACKAGE_REPORT.md/INSTALL.md. Obtaining an
+      # Apple Developer Program membership and a Windows code-signing
+      # certificate is the operator's job — both require the operator's own
+      # identity and payment, not something this pipeline can acquire on
+      # its own. This step's job ends at correctly consuming them once
+      # provided as repo secrets.
+      - name: Build (and sign, if certificates are configured)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        with:
+          projectPath: apps/launcher
+          uploadWorkflowArtifacts: true
