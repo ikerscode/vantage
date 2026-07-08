@@ -8,9 +8,10 @@
 # "our code is broken" in its error messages — see the fail_data vs
 # fail_logic helpers below.
 #
-# Requires: curl, python3, psql (only for the monitor-sweep step's test
-# setup — see the comment there), and apps/api's venv for one direct
-# Python invocation (also monitor-sweep only).
+# Requires: curl, python3, and either a native run (psql + apps/api's venv
+# reachable on the host — see PYTHON_BIN/PSQL_DSN below) or a docker-compose
+# run (set COMPOSE_FILE; the monitor-sweep step then execs into the running
+# containers instead — see the comment there for why that's necessary).
 set -uo pipefail
 
 API_BASE_URL="${API_BASE_URL:-http://localhost:8000}"
@@ -18,6 +19,19 @@ TILER_BASE_URL="${TILER_BASE_URL:-http://localhost:8001}"
 APPS_API_DIR="${APPS_API_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../apps/api" && pwd)}"
 PYTHON_BIN="${PYTHON_BIN:-$APPS_API_DIR/.venv/bin/python}"
 PSQL_DSN="${PSQL_DSN:-postgresql://vantage@localhost:5432/vantage}"
+# Set by the CI test job (COMPOSE_FILE=infra/docker-compose.yml) — when
+# present, the monitor-sweep step below execs into the compose containers
+# instead of trying to reach them from the host. Found for real in CI
+# (BRIEF v1.5): `db` has no published host port and its hostname only
+# resolves inside the compose network, so a host-side psql/python
+# invocation against a containerized stack silently no-ops or crashes
+# (psql's failure was swallowed by `>/dev/null 2>&1`; the direct
+# sweep_monitors() call raised an uncaught "failed to resolve host 'db'").
+# That meant the sweep step never genuinely ran against the containerized
+# stack, and "no Event fired" was — misleadingly — reported as a plausible
+# real-world data outcome rather than a broken test.
+COMPOSE_FILE="${COMPOSE_FILE:-}"
+COMPOSE_API_SERVICE="${COMPOSE_API_SERVICE:-api}"
 # SEC-01: must match the tiler's TILER_TOKEN env var (services/tiler/app/security.py) —
 # defaults to the same dev fallback apps/api's Settings.tiler_token uses, so
 # this keeps working out of the box against a plain `docker compose up`/
@@ -236,19 +250,29 @@ else
   # created. Backdating created_at here exercises the real due-check/sweep
   # logic deterministically instead of sleeping ~60s for a real minute
   # boundary — it does not fake anything the sweep itself does.
-  if command -v psql >/dev/null 2>&1; then
-    psql "$PSQL_DSN" -c "UPDATE monitor SET created_at = now() - interval '5 minutes' WHERE id = '$MONITOR_ID';" >/dev/null 2>&1
-  fi
-
+  #
   # sweep_monitors() does a real STAC search + real change-detection run
   # (10-25s observed against live Earth Search).
-  "$PYTHON_BIN" -c "
+  if [ -n "$COMPOSE_FILE" ]; then
+    docker compose -f "$COMPOSE_FILE" exec -T db \
+      psql -U vantage -d vantage \
+      -c "UPDATE monitor SET created_at = now() - interval '5 minutes' WHERE id = '$MONITOR_ID';" >/dev/null 2>&1
+    docker compose -f "$COMPOSE_FILE" exec -T "$COMPOSE_API_SERVICE" python -c "
+from app.tasks.monitor_sweep import sweep_monitors
+sweep_monitors()
+" 2>&1
+  else
+    if command -v psql >/dev/null 2>&1; then
+      psql "$PSQL_DSN" -c "UPDATE monitor SET created_at = now() - interval '5 minutes' WHERE id = '$MONITOR_ID';" >/dev/null 2>&1
+    fi
+    "$PYTHON_BIN" -c "
 import os, sys
 sys.path.insert(0, '$APPS_API_DIR')
 os.chdir('$APPS_API_DIR')
 from app.tasks.monitor_sweep import sweep_monitors
 sweep_monitors()
 " 2>&1
+  fi
 
   EVENT_ROW=$(curl -sS --max-time 15 "$API_BASE_URL/api/events" -H "Authorization: Bearer $TOKEN" \
     | python3 -c "

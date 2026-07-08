@@ -99,8 +99,11 @@ jobs:
         env:
           API_BASE_URL: http://localhost:8000
           TILER_BASE_URL: http://localhost:8001
-          PYTHON_BIN: ${{ github.workspace }}/apps/api/.venv/bin/python
-          PSQL_DSN: postgresql://vantage:${{ env.POSTGRES_PASSWORD }}@localhost:5432/vantage
+          # `db` has no published host port and isn't resolvable from the
+          # runner (found for real in CI, BRIEF v1.5 — see smoke.sh's own
+          # comment) — COMPOSE_FILE tells the monitor-sweep step to exec
+          # into the running containers instead of the host.
+          COMPOSE_FILE: infra/docker-compose.yml
         run: ./scripts/smoke.sh
 
       - name: Dump service logs (only runs on failure, for diagnosis)
