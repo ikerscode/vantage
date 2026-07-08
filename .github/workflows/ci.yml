@@ -60,18 +60,31 @@ jobs:
       - name: Generate real per-install secrets (same script a real first run uses)
         run: python3 scripts/generate_dev_secrets.py
 
-      - name: Load generated env into subsequent steps
+      # SECURITY (found for real in this workflow's own first run — see
+      # CI_REPORT.md): values loaded into $GITHUB_ENV from a generated file
+      # are NOT automatically masked in subsequent step logs — GitHub only
+      # auto-masks values that flow through the `secrets.*` context. A
+      # later step's routine env-dump (e.g. `docker compose ... ps`) would
+      # otherwise print every generated secret in plaintext, in a PUBLIC
+      # repo's logs. `::add-mask::` is a workflow command that must reach
+      # actual stdout (unredirected) for the runner to act on it — it must
+      # NOT be written into the $GITHUB_ENV file itself, which is just a
+      # plain KEY=value file the runner reads afterward, not a command
+      # stream. So this writes to each destination explicitly instead of
+      # redirecting the whole script's stdout to one place.
+      - name: Load generated env into subsequent steps (masked)
         run: |
           python3 -c "
-          import shlex
-          with open('infra/.env') as f:
+          import os
+          with open('infra/.env') as f, open(os.environ['GITHUB_ENV'], 'a') as env_out:
               for line in f:
                   line = line.strip()
                   if not line or line.startswith('#') or '=' not in line:
                       continue
                   key, _, value = line.partition('=')
-                  print(f'{key}={value}')
-          " >> "$GITHUB_ENV"
+                  print(f'::add-mask::{value}')
+                  env_out.write(f'{key}={value}\n')
+          "
 
       - name: Bring up the real stack — real Dockerfile builds, real Postgres/Redis/MinIO/api/worker/beat/tiler/inference
         working-directory: infra

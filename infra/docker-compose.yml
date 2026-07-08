@@ -165,7 +165,11 @@ services:
       context: ..
       dockerfile: apps/api/Dockerfile
     env_file: .env
-    command: celery -A app.core.celery_app beat --loglevel=info
+    # --schedule points celery beat's gdbm-backed schedule file at the /tmp
+    # tmpfs (see the *hardened anchor) instead of its default of CWD (/app) —
+    # found for real in CI (BRIEF v1.5): read_only: true means beat can't
+    # write anywhere else, and it crashes at startup if it tries.
+    command: celery -A app.core.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
     depends_on:
       api-migrate:
         condition: service_completed_successfully

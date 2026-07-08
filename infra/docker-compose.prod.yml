@@ -190,7 +190,9 @@ services:
     <<: *hardened
     image: ${VANTAGE_API_IMAGE:-vantage-api:1.0.0}
     env_file: ${VANTAGE_DATA_DIR}/config/.env
-    command: celery -A app.core.celery_app beat --loglevel=info
+    # See docker-compose.yml's identical fix for why this points at /tmp —
+    # found for real in CI (BRIEF v1.5).
+    command: celery -A app.core.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
     volumes:
       - ${VANTAGE_DATA_DIR}/logs:/var/log/vantage
     depends_on:
