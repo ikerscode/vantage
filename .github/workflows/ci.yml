@@ -247,28 +247,40 @@ jobs:
         run: npm ci
 
       # Signing (SEC per BRIEF v1.5 Phase 1's "sign" step): wired, not
-      # blocking. tauri-action / the underlying Tauri CLI signs
-      # automatically IF these env vars are non-empty (standard Tauri CI
-      # convention) and silently produces an unsigned bundle if they're
-      # unset — Gatekeeper/SmartScreen will warn on the unsigned artifact,
-      # exactly as flagged in PACKAGE_REPORT.md/INSTALL.md. Obtaining an
-      # Apple Developer Program membership and a Windows code-signing
-      # certificate is the operator's job — both require the operator's own
-      # identity and payment, not something this pipeline can acquire on
-      # its own. This step's job ends at correctly consuming them once
-      # provided as repo secrets.
+      # blocking — but found for real in CI (this run): `${{ secrets.X }}`
+      # evaluates to an EMPTY STRING when the secret doesn't exist, it does
+      # not omit the env var. Tauri's macOS bundler checks
+      # `env::var("APPLE_CERTIFICATE").is_ok()`, which is true even for an
+      # empty string, so setting these unconditionally made every
+      # unsigned build crash trying to `security import` empty certificate
+      # data, instead of skipping signing gracefully as intended. Only
+      # write each var into $GITHUB_ENV when it's genuinely non-empty, so
+      # an unconfigured var is truly absent (env::var returns Err) rather
+      # than present-but-empty. Obtaining an Apple Developer Program
+      # membership and a Windows code-signing certificate is the operator's
+      # job — both require the operator's own identity and payment, not
+      # something this pipeline can acquire on its own.
+      - name: Export signing secrets only when actually configured (avoids Ok("") vs Err(NotPresent))
+        shell: bash
+        run: |
+          set_if_present() {
+            if [ -n "$2" ]; then
+              echo "$1=$2" >> "$GITHUB_ENV"
+            fi
+          }
+          set_if_present APPLE_CERTIFICATE "${{ secrets.APPLE_CERTIFICATE }}"
+          set_if_present APPLE_CERTIFICATE_PASSWORD "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}"
+          set_if_present APPLE_SIGNING_IDENTITY "${{ secrets.APPLE_SIGNING_IDENTITY }}"
+          set_if_present APPLE_ID "${{ secrets.APPLE_ID }}"
+          set_if_present APPLE_PASSWORD "${{ secrets.APPLE_PASSWORD }}"
+          set_if_present APPLE_TEAM_ID "${{ secrets.APPLE_TEAM_ID }}"
+          set_if_present WINDOWS_CERTIFICATE "${{ secrets.WINDOWS_CERTIFICATE }}"
+          set_if_present WINDOWS_CERTIFICATE_PASSWORD "${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}"
+
       - name: Build (and sign, if certificates are configured)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         with:
           projectPath: apps/launcher
 

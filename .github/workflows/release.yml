@@ -67,18 +67,34 @@ jobs:
       # Same signing posture as ci.yml: wired, not blocking. Unsigned
       # releases are labeled as such by Gatekeeper/SmartScreen themselves —
       # this workflow doesn't need to do anything extra to "label" that.
+      #
+      # Same fix as ci.yml's build-desktop job (found for real in CI, BRIEF
+      # v1.5): `${{ secrets.X }}` evaluates to an empty string when a secret
+      # doesn't exist rather than omitting the env var, and Tauri's macOS
+      # bundler treats Ok("") the same as "signing requested" — only write
+      # each var into $GITHUB_ENV when genuinely non-empty, so it's truly
+      # absent (Err) rather than present-but-empty when unconfigured.
+      - name: Export signing secrets only when actually configured (avoids Ok("") vs Err(NotPresent))
+        shell: bash
+        run: |
+          set_if_present() {
+            if [ -n "$2" ]; then
+              echo "$1=$2" >> "$GITHUB_ENV"
+            fi
+          }
+          set_if_present APPLE_CERTIFICATE "${{ secrets.APPLE_CERTIFICATE }}"
+          set_if_present APPLE_CERTIFICATE_PASSWORD "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}"
+          set_if_present APPLE_SIGNING_IDENTITY "${{ secrets.APPLE_SIGNING_IDENTITY }}"
+          set_if_present APPLE_ID "${{ secrets.APPLE_ID }}"
+          set_if_present APPLE_PASSWORD "${{ secrets.APPLE_PASSWORD }}"
+          set_if_present APPLE_TEAM_ID "${{ secrets.APPLE_TEAM_ID }}"
+          set_if_present WINDOWS_CERTIFICATE "${{ secrets.WINDOWS_CERTIFICATE }}"
+          set_if_present WINDOWS_CERTIFICATE_PASSWORD "${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}"
+
       - name: Build, sign (if configured), and publish to the GitHub Release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         with:
           projectPath: apps/launcher
           tagName: ${{ github.ref_name }}
