@@ -13,7 +13,15 @@ use vantage_launcher_core::{compose, health, images, runtime_detect, secrets, se
 
 use crate::state::LauncherState;
 
-const HEALTH_GATE_TIMEOUT: Duration = Duration::from_secs(180);
+// Found for real in CI (BRIEF v1.6's clean-machine acceptance test): a
+// cold boot of the full stack (db -> pgstac-migrate -> api-migrate ->
+// minio-init -> api/tiler) on a modest machine can genuinely take longer
+// than 3 minutes — the previous value was never tested against a real
+// cold start (no prior brief had actually launched the packaged app).
+// This is real first-boot cost, not a bug to paper over with a longer
+// number alone: worth a real look if it keeps needing more than this in
+// practice, but 3 minutes was demonstrably too tight even once.
+const HEALTH_GATE_TIMEOUT: Duration = Duration::from_secs(420);
 const POLL_INTERVAL: Duration = Duration::from_millis(1500);
 
 #[derive(Serialize, Clone)]

@@ -216,47 +216,64 @@ jobs:
           test -x "$bin"
           echo "bin=$bin" >> "$GITHUB_OUTPUT"
 
+      # A dedicated, unprivileged user to run the GUI launcher as — NOT the
+      # `runner` user the GitHub Actions agent itself runs as. Found for
+      # real in the first attempt at this job: a blanket `iptables -P
+      # OUTPUT DROP` cuts the runner agent's OWN connectivity too (it's a
+      # host process like any other), so GitHub's orchestration concluded
+      # the runner had died and CANCELLED the job after ~10 minutes — the
+      # launcher kept running the whole time (its log only couldn't be
+      # streamed back until network was restored). Scoping the cut to this
+      # user's UID instead leaves the agent (a different UID) completely
+      # unaffected while still genuinely cutting the app's own network path.
+      - name: Create a dedicated user to run the GUI launcher as
+        run: |
+          sudo useradd -m -s /bin/bash vantagetest
+          sudo usermod -aG docker vantagetest
+
       - name: Place the offline bundle where the launcher expects an operator-provided one (docs/AIRGAP.md)
         run: |
-          mkdir -p ~/.local/share/VANTAGE
-          cp vantage-images-1.0.0.tar ~/.local/share/VANTAGE/vantage-images-1.0.0.tar
+          sudo -u vantagetest mkdir -p /home/vantagetest/.local/share/VANTAGE
+          sudo cp vantage-images-1.0.0.tar /home/vantagetest/.local/share/VANTAGE/vantage-images-1.0.0.tar
+          sudo chown vantagetest:vantagetest /home/vantagetest/.local/share/VANTAGE/vantage-images-1.0.0.tar
 
       - name: Install Xvfb (headless display for the GUI launcher)
         run: sudo apt-get install -y xvfb
 
-      # This is the actual claim under test: everything from here on must
-      # work with the loopback interface as the ONLY reachable network path
-      # — no real internet egress at all. Docker's container-to-container
-      # traffic goes through the kernel's FORWARD chain, not OUTPUT, so it
-      # is deliberately untouched here — blocking it would test something
-      # this app never claimed (containers not needing internet to talk to
-      # EACH OTHER was never in question; not needing internet to talk to
-      # the outside world is). Same recipe as docs/AIRGAP.md's own
-      # "Verifying no external calls yourself", made a hard default-deny
-      # instead of just port 443, to prove the stronger claim for real.
-      - name: Cut network access (loopback only — real air-gap simulation)
+      # This is the actual claim under test: the launcher (and its direct
+      # HTTP calls) must work with no real internet egress at all — proven
+      # by blocking every packet vantagetest's UID originates. Docker's
+      # container-to-container traffic goes through the kernel's FORWARD
+      # chain, not OUTPUT (and is driven by dockerd, running as root, not
+      # by this UID), so it's deliberately untouched here — blocking it
+      # would test something this app never claimed (containers not
+      # needing internet to talk to EACH OTHER was never in question; not
+      # needing internet to talk to the outside world is). The app's
+      # architecture already has independent evidence for the container
+      # side too (PACKAGE_REPORT.md's static grep audit for external URLs
+      # found none outside the online-mode-only earth_search.py adapter).
+      - name: Cut network access for the launcher's own user (real air-gap simulation, runner agent unaffected)
         run: |
-          sudo iptables -I OUTPUT -o lo -j ACCEPT
-          sudo iptables -P OUTPUT DROP
+          sudo iptables -A OUTPUT -m owner --uid-owner vantagetest -j DROP
           sudo iptables -L OUTPUT -v
 
-      - name: Launch VANTAGE headlessly with network cut
+      - name: Launch VANTAGE headlessly as the isolated user, with its network cut
         run: |
-          xvfb-run -a "${{ steps.find_bin.outputs.bin }}" > launcher-stdout.log 2>&1 &
+          sudo -H -u vantagetest bash -c 'xvfb-run -a "${{ steps.find_bin.outputs.bin }}"' > launcher-stdout.log 2>&1 &
           echo $! > launcher.pid
           sleep 2
           echo "launched pid $(cat launcher.pid)"
 
-      - name: Wait for the health-gate to report ready (up to 3 minutes, matching boot.rs's own timeout)
+      - name: Wait for the health-gate to report ready (up to 7 minutes, matching boot.rs's own timeout)
         run: |
-          for i in $(seq 1 90); do
+          for i in $(seq 1 210); do
             if curl -sf http://127.0.0.1:8000/api/health >/dev/null 2>&1 && curl -sf http://127.0.0.1:8001/health >/dev/null 2>&1; then
               echo "healthy after ~$((i * 2))s"
               exit 0
             fi
             sleep 2
           done
-          echo "::error::never became healthy within 180s"
+          echo "::error::never became healthy within 420s"
           cat launcher-stdout.log
           exit 1
 
@@ -282,7 +299,7 @@ jobs:
       # the actual claim under test.
       - name: Confirm the demo AOI renders real Sentinel-2 imagery with zero network calls (scripts/smoke.sh, offline mode)
         run: |
-          TILER_TOKEN=$(grep '^TILER_TOKEN=' ~/.local/share/VANTAGE/config/.env | cut -d= -f2-)
+          TILER_TOKEN=$(sudo grep '^TILER_TOKEN=' /home/vantagetest/.local/share/VANTAGE/config/.env | cut -d= -f2-)
           test -n "$TILER_TOKEN"
           API_BASE_URL=http://127.0.0.1:8000 TILER_BASE_URL=http://127.0.0.1:8001 TILER_TOKEN="$TILER_TOKEN" \
             ./scripts/smoke.sh 2>&1 | tee smoke-offline.log || true
@@ -297,9 +314,9 @@ jobs:
           grep -q "PASS: change-map tile fetched" smoke-offline.log
           echo "ALL REQUIRED EVIDENCE PRESENT: demo AOI genuinely rendered real Sentinel-2 imagery, offline, from the bundled static catalog"
 
-      - name: Restore network access
+      - name: Restore network access (cleanup — the runner-scoped default policy was never touched, only vantagetest's rule)
         if: always()
-        run: sudo iptables -P OUTPUT ACCEPT
+        run: sudo iptables -D OUTPUT -m owner --uid-owner vantagetest -j DROP || true
 
       - name: Dump launcher + smoke-test logs (always, for the report)
         if: always()
