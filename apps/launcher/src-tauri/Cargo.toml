@@ -17,10 +17,16 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
 
-# Not used directly — forces Cargo's feature unification to build libdbus
-# from source (needs only a C compiler) instead of linking the system
-# libdbus-1-dev package, which isn't installable without root in every build
-# environment (this one included — see PACKAGE_REPORT.md). tao (Tauri's
-# Linux windowing layer) pulls in dbus unconditionally; this is the one
-# lever available to avoid that system dependency without root.
+# Linux-only (found for real in CI, BRIEF v1.5 — libdbus-sys's build script
+# hard-errors with "Unsupported platform." on macOS/Windows; this crate
+# doesn't exist as a concept there, and the [dependencies] table used to
+# pull it in unconditionally, breaking both non-Linux legs of the
+# build-desktop matrix). Not used directly — forces Cargo's feature
+# unification to build libdbus from source (needs only a C compiler)
+# instead of linking the system libdbus-1-dev package, which isn't
+# installable without root in every build environment (this one included —
+# see PACKAGE_REPORT.md). tao (Tauri's Linux windowing layer) pulls in dbus
+# unconditionally on Linux; this is the one lever available there to avoid
+# that system dependency without root.
+[target.'cfg(target_os = "linux")'.dependencies]
 dbus = { version = "0.9", features = ["vendored"] }
