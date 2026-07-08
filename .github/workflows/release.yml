@@ -122,16 +122,25 @@ jobs:
           releaseDraft: true
           prerelease: false
 
-  # BRIEF v1.6: the offline image bundle (~6.6 GiB — see
-  # OFFLINE_BUNDLE_REPORT.md) doesn't fit as a single release asset (hard
-  # 2 GiB/file cap) or embedded in an installer (same cap, plus it would
-  # roughly double every push's build-desktop time for no benefit — only
-  # tagged releases are real distribution points). Ships as chunked release
-  # assets instead, built once (not once per matrix platform) and attached
-  # to the same release the `release` job above just created.
-  offline-bundle:
+  # Builds every production image once (not once per matrix platform) and
+  # distributes them both ways BRIEF v1.7 ships (see PACKAGING_V2_REPORT.md
+  # for why both are real, needed paths, not redundant):
+  #
+  #   - Air-gap bundle (BRIEF v1.6): the real tarball — ~2.7 GiB as of
+  #     BRIEF v1.7's size fixes (was 6.6 GiB) — still doesn't fit a single
+  #     release asset (hard 2 GiB/file cap) or an installer, so it ships as
+  #     chunked release assets the operator downloads separately.
+  #   - Thin/online install (BRIEF v1.7): the same images, pushed to GHCR
+  #     (free for this public repo) so a normal install with network access
+  #     never needs the multi-GB bundle at all — apps/launcher/launcher-
+  #     core/src/images.rs pulls them automatically on first run when no
+  #     local tarball is found.
+  publish-images:
     needs: release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # gh release upload
+      packages: write   # docker push to ghcr.io
     steps:
       - uses: actions/checkout@v4
 
@@ -159,6 +168,35 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tagged by VANTAGE_VERSION (the image-bundle version — see
+      # build-images.sh), not the launcher's own git release tag: the two
+      # version numbers are already deliberately decoupled everywhere else
+      # in this repo (docker-compose.prod.yml's defaults, secrets.rs's
+      # hardcoded image references), and launcher-core/src/images.rs's
+      # REQUIRED_IMAGES list needs a fixed, predictable reference to pull —
+      # not one that changes on every launcher-only release.
+      #
+      # NOTE (operator action required — see PACKAGING_V2_REPORT.md):
+      # packages pushed to GHCR default to PRIVATE regardless of the
+      # repo's own visibility, and GITHUB_TOKEN cannot change that (GitHub
+      # Packages visibility management requires a classic PAT). Each of
+      # these 4 packages needs a one-time "make public" click (or API call
+      # with a classic PAT) before an anonymous thin-installer pull will
+      # actually succeed — this push alone is not sufficient on its own.
+      - name: Push production images to GHCR (thin/online installer path)
+        run: |
+          for img in vantage-api vantage-tiler vantage-inference vantage-pgstac-migrate; do
+            docker tag "$img:1.0.0" "ghcr.io/ikerscode/$img:1.0.0"
+            docker push "ghcr.io/ikerscode/$img:1.0.0"
+          done
+
   # BRIEF v1.6: the actual BRIEF v1.3 §12 acceptance test — "install on a
   # clean machine, cut network access, launch, confirm the demo AOI renders
   # real Sentinel-2 imagery with zero network calls" — never done once,
@@ -168,7 +206,7 @@ jobs:
   # downloads the SAME release assets an end user would (not a build
   # artifact this workflow already has lying around).
   airgap-acceptance-test:
-    needs: [release, offline-bundle]
+    needs: [release, publish-images]
     runs-on: ubuntu-22.04
     steps:
       # Only for scripts/smoke.sh's already-correct, already-proven tile-
@@ -347,4 +385,113 @@ jobs:
           echo "::endgroup::"
           echo "::group::smoke-offline.log"
           cat smoke-offline.log || true
+          echo "::endgroup::"
+
+  # BRIEF v1.7: the actual point of the thin/online installer — most real
+  # users should hit this path, not the air-gap one, and it had never been
+  # tested at all before now. A fresh runner with real network access, no
+  # offline bundle placed anywhere, confirms the launcher genuinely pulls
+  # from GHCR (not the pre-v1.7 behavior of silently doing nothing) and the
+  # demo AOI still renders — same real standard as airgap-acceptance-test,
+  # just for the opposite precondition.
+  thin-installer-acceptance-test:
+    needs: [release, publish-images]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download only the installer — exactly what a thin-install end user gets (no offline bundle)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" \
+            --pattern "VANTAGE_*_amd64.deb"
+          ls -la
+
+      - name: Install the real .deb on this clean machine
+        run: |
+          sudo apt-get update
+          sudo dpkg -i VANTAGE_*_amd64.deb || sudo apt-get install -f -y
+
+      - name: Locate the installed binary (discovered, not assumed)
+        id: find_bin
+        run: |
+          bin=$(dpkg -L vantage 2>/dev/null | grep -E '/(usr/bin|opt)/.*[Vv][Aa][Nn][Tt][Aa][Gg][Ee]' | grep -v '\.so' | head -1)
+          if [ -z "$bin" ]; then
+            bin=$(find /usr/bin /opt -iname "*vantage*" -type f -executable 2>/dev/null | head -1)
+          fi
+          echo "found binary: $bin"
+          test -x "$bin"
+          echo "bin=$bin" >> "$GITHUB_OUTPUT"
+
+      - name: Install Xvfb (headless display for the GUI launcher)
+        run: sudo apt-get install -y xvfb
+
+      # Same D-Bus-session + XDG_RUNTIME_DIR fixes the air-gap acceptance
+      # test needed (BRIEF v1.6) — a real login session provides both via
+      # systemd-logind/pam_systemd, which this runner's default `runner`
+      # user doesn't have. Applied up front here since they're already
+      # proven necessary, not rediscovered the slow way a second time.
+      - name: Prepare a real XDG_RUNTIME_DIR for the runner user
+        run: |
+          uid=$(id -u)
+          sudo mkdir -p "/run/user/$uid"
+          sudo chown "$(whoami)":"$(whoami)" "/run/user/$uid"
+          sudo chmod 700 "/run/user/$uid"
+          echo "RUNNER_UID=$uid" >> "$GITHUB_ENV"
+
+      # No tarball anywhere, no network cut — this IS the thin-installer
+      # claim under test: does it genuinely pull from GHCR on its own.
+      - name: Launch VANTAGE headlessly with real network access, no offline bundle present
+        run: |
+          env "XDG_RUNTIME_DIR=/run/user/${RUNNER_UID}" \
+            dbus-run-session -- xvfb-run -a "${{ steps.find_bin.outputs.bin }}" > launcher-stdout.log 2>&1 &
+          echo $! > launcher.pid
+          sleep 2
+          echo "launched pid $(cat launcher.pid)"
+
+      - name: Wait for the health-gate to report ready (up to 7 minutes, matching boot.rs's own timeout)
+        run: |
+          for i in $(seq 1 210); do
+            if curl -sf http://127.0.0.1:8000/api/health >/dev/null 2>&1 && curl -sf http://127.0.0.1:8001/health >/dev/null 2>&1; then
+              echo "healthy after ~$((i * 2))s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::never became healthy within 420s"
+          cat launcher-stdout.log
+          exit 1
+
+      # The actual headline result for this path: confirm the launcher's
+      # own log shows it genuinely pulled from the registry (not a silent
+      # no-op, which was the pre-v1.7 behavior for a missing tarball).
+      - name: Confirm images were pulled from GHCR, not found locally
+        run: |
+          grep -q "pulled images from the container registry" launcher-stdout.log
+          echo "CONFIRMED: thin installer pulled real images from GHCR, not a bundled tarball"
+
+      - name: Confirm the demo AOI renders real Sentinel-2 imagery (scripts/smoke.sh)
+        run: |
+          TILER_TOKEN=$(grep '^TILER_TOKEN=' ~/.local/share/VANTAGE/config/.env | cut -d= -f2-)
+          test -n "$TILER_TOKEN"
+          API_BASE_URL=http://127.0.0.1:8000 TILER_BASE_URL=http://127.0.0.1:8001 TILER_TOKEN="$TILER_TOKEN" \
+            ./scripts/smoke.sh 2>&1 | tee smoke-thin.log || true
+          echo "--- checking the specific evidence that matters for this claim ---"
+          grep -q "PASS: issued a dev token" smoke-thin.log
+          grep -q "PASS: created AOI" smoke-thin.log
+          grep -q "PASS: true-color tile fetched" smoke-thin.log
+          grep -q "PASS: NDVI tile fetched" smoke-thin.log
+          grep -q "PASS: analysis completed" smoke-thin.log
+          grep -q "PASS: change-map tile fetched" smoke-thin.log
+          echo "ALL REQUIRED EVIDENCE PRESENT: demo AOI genuinely rendered real Sentinel-2 imagery via the thin-installer (GHCR-pulled) path"
+
+      - name: Dump launcher + smoke-test logs (always, for the report)
+        if: always()
+        run: |
+          echo "::group::launcher-stdout.log"
+          cat launcher-stdout.log || true
+          echo "::endgroup::"
+          echo "::group::smoke-thin.log"
+          cat smoke-thin.log || true
           echo "::endgroup::"

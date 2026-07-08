@@ -98,27 +98,33 @@ pub fn run(app: AppHandle, data_dir: PathBuf, api_port: u16, tiler_port: u16, db
         }
     }
 
-    emit_progress(&app, "loading offline images…");
-    // Checked in order (BRIEF v1.6 — see OFFLINE_BUNDLE_REPORT.md): the
-    // bundled-resource path is kept as a candidate in case a future build
-    // ever does embed the tarball, but the real path today is the
-    // operator-provided one — the tarball is ~6.6 GiB, over 3x GitHub's
-    // hard 2 GiB release-asset cap, so it ships as a separate chunked
-    // download the operator reassembles into VANTAGE's data directory
-    // (see docs/AIRGAP.md), not inside the installer.
+    emit_progress(&app, "getting container images…");
+    // Checked in order (BRIEF v1.6's air-gap bundle, BRIEF v1.7's
+    // thin/online path — see OFFLINE_BUNDLE_REPORT.md and
+    // PACKAGING_V2_REPORT.md): the bundled-resource path is kept as a
+    // candidate in case a future build ever does embed the tarball; the
+    // operator-provided data-dir path is the real air-gap path today (a
+    // separate chunked download reassembled into VANTAGE's data directory
+    // — see docs/AIRGAP.md, required for genuinely offline operation). If
+    // neither has a tarball, ensure_images_loaded falls through to a
+    // registry pull — the thin/online-installer path most users should
+    // actually hit. If THAT also fails (no bundle, no network), that's a
+    // real unrecoverable state, surfaced as a hard failure here rather
+    // than a warning that leaves `compose up` to fail later with a
+    // cryptic "pull access denied" (these images were never on any
+    // registry before BRIEF v1.7 — see images.rs's own module docs).
     let tarball_candidates = vec![
         resource_dir.join("infra").join("vantage-images-1.0.0.tar"),
         data_dir.join("vantage-images-1.0.0.tar"),
     ];
     match images::ensure_images_loaded(&runtime, &tarball_candidates, &data_dir) {
-        Ok(true) => emit_progress(&app, "loaded images from the offline bundle"),
-        Ok(false) => emit_progress(
-            &app,
-            "no offline image bundle found — see docs/AIRGAP.md to download one \
-             (required for a fully offline install; these images are never pulled \
-             from a registry)",
-        ),
-        Err(e) => emit_progress(&app, format!("warning: couldn't load offline images: {e}")),
+        Ok(images::ImageSource::AlreadyLoaded) => {}
+        Ok(images::ImageSource::Tarball) => emit_progress(&app, "loaded images from the offline bundle"),
+        Ok(images::ImageSource::Registry) => emit_progress(&app, "pulled images from the container registry"),
+        Err(e) => {
+            emit_failed(&app, format!("couldn't get the required container images: {e}"));
+            return;
+        }
     }
 
     emit_progress(&app, "starting database, object store, and services…");
