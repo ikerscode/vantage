@@ -68,7 +68,20 @@ class StaticCatalogSource(ImagerySource):
         raise ValueError(f"item {item_id!r} not found in collection {collection!r}")
 
     def _asset_path(self, entry: dict, asset_key: str) -> str:
-        return f"{self._mount_path}/{entry['assets'][asset_key]}"
+        # file:// (not a bare path): the tiler's SSRF-hardening allowlist
+        # (services/tiler/app/security.py's validated_url) requires a real
+        # URL scheme on anything passed as its `url` query param — found
+        # for real in CI (BRIEF v1.6), a bare path was rejected with
+        # "unsupported URL scheme: ''" and nobody had ever actually
+        # rendered a static_catalog tile through the tiler before that
+        # brief's acceptance test. The tiler's own file:// handling is
+        # scoped to exactly this mount path, mirroring how s3:// is scoped
+        # to the app's own bucket. (item.json's own *internal* asset hrefs,
+        # read directly by rio-tiler's STACReader rather than passed
+        # through validated_url, stay bare paths — see
+        # scripts/package/build_demo_stac_items.py — no change needed
+        # there.)
+        return f"file://{self._mount_path}/{entry['assets'][asset_key]}"
 
     def _to_scene_metadata(self, entry: dict) -> SceneMetadata:
         date_dir = Path(entry["assets"]["visual"]).parent.as_posix()
@@ -79,5 +92,5 @@ class StaticCatalogSource(ImagerySource):
             cloud_cover=entry.get("cloud_cover"),
             bbox=tuple(entry["bbox"]),
             assets={key: self._asset_path(entry, key) for key in entry["assets"]},
-            self_href=f"{self._mount_path}/{date_dir}/item.json",
+            self_href=f"file://{self._mount_path}/{date_dir}/item.json",
         )

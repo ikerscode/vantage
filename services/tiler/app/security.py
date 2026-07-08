@@ -21,11 +21,28 @@ AWS_* env-configured credentials) and that's the ONE legitimate non-http(s)
 case — restricted to the app's own configured bucket, never an arbitrary
 bucket name a caller could supply to read something else out of the same
 MinIO/S3 account.
+
+`file://` URLs are a second such exception, added in BRIEF v1.6 — found
+for real in that brief's clean-machine acceptance test: static_catalog
+mode's bundled demo scenes (apps/api/app/imagery/static_catalog.py) are
+plain local files, and this function's scheme check had always rejected
+them outright (see this module's own pre-existing test,
+test_file_scheme_is_rejected — that rejection was a deliberate SEC-01
+decision, not an oversight; general file:// support IS a classic
+local-file-inclusion vector for a "fetch whatever URL you're given"
+service). Nobody had ever actually rendered a static_catalog tile through
+the tiler before that acceptance test, so the two features — SEC-01's
+allowlist and the offline imagery mode — had never been exercised
+together. The fix mirrors s3://'s pattern exactly: allowed only under the
+app's own configured STATIC_CATALOG_MOUNT_PATH, resolved (not just
+string-prefix-matched, which `..` traversal would defeat) before the
+containment check, never an arbitrary caller-supplied path.
 """
 
 import ipaddress
 import os
 import socket
+from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlparse
 
@@ -51,6 +68,10 @@ def _allowed_hosts() -> set[str]:
 
 def _own_bucket() -> str:
     return os.environ.get("S3_BUCKET_ANALYSIS", "vantage-analysis")
+
+
+def _static_catalog_mount_path() -> str:
+    return os.environ.get("STATIC_CATALOG_MOUNT_PATH", "/data/demo")
 
 
 def _reject_if_disallowed_ip(hostname: str) -> None:
@@ -81,6 +102,20 @@ def validated_url(url: Annotated[str, Query(description="Dataset URL")]) -> str:
                 detail="s3:// URLs are only allowed for this app's own analysis-output bucket",
             )
         return url
+
+    if scheme == "file":
+        # Resolved, not string-prefix-matched: "/data/demo/../../etc/passwd"
+        # starts with "/data/demo" as raw text but must not be allowed
+        # through — .resolve() collapses the ".." before the containment
+        # check runs.
+        mount_path = Path(_static_catalog_mount_path()).resolve()
+        requested = Path(parsed.path).resolve()
+        if requested != mount_path and mount_path not in requested.parents:
+            raise HTTPException(
+                status_code=400,
+                detail=f"file:// URLs are only allowed under {str(mount_path)!r}",
+            )
+        return str(requested)  # GDAL/rasterio want a bare path, not a file:// URI
 
     if scheme not in ("http", "https"):
         raise HTTPException(status_code=400, detail=f"unsupported URL scheme: {scheme!r}")
