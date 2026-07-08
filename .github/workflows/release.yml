@@ -230,6 +230,17 @@ jobs:
         run: |
           sudo useradd -m -s /bin/bash vantagetest
           sudo usermod -aG docker vantagetest
+          # A real login (via a display/session manager) gets this from
+          # systemd-logind/pam_systemd automatically; `sudo -u` doesn't
+          # provide one at all, which is a separate, distinct problem from
+          # the D-Bus session bus fixed previously — various GTK/portal
+          # machinery (used indirectly by the tray icon) needs a real,
+          # correctly-owned XDG_RUNTIME_DIR to create its own sockets/files.
+          uid=$(id -u vantagetest)
+          sudo mkdir -p "/run/user/$uid"
+          sudo chown vantagetest:vantagetest "/run/user/$uid"
+          sudo chmod 700 "/run/user/$uid"
+          echo "VANTAGETEST_UID=$uid" >> "$GITHUB_ENV"
 
       - name: Place the offline bundle where the launcher expects an operator-provided one (docs/AIRGAP.md)
         run: |
@@ -257,17 +268,19 @@ jobs:
           sudo iptables -A OUTPUT -m owner --uid-owner vantagetest -j DROP
           sudo iptables -L OUTPUT -v
 
-      # Found for real in CI (this attempt): the tray icon (built in
-      # main.rs's setup() hook, via `?` — a failure there aborts the whole
-      # setup closure before boot::run()'s thread is ever spawned) needs a
-      # D-Bus session bus. `vantagetest` has no real login session to
-      # provide one, so the launcher panicked at startup — the health-gate
-      # loop below then spent its entire budget waiting on a process that
-      # had already exited. dbus-run-session is the standard fix for
-      # exactly this in headless Linux GUI testing.
+      # Found for real in CI (this attempt, and the one before it): the
+      # tray icon (built in main.rs's setup() hook, via `?` — a failure
+      # there aborts the whole setup closure before boot::run()'s thread is
+      # ever spawned) needs both a D-Bus session bus (fixed previously via
+      # dbus-run-session) AND a real XDG_RUNTIME_DIR (fixed just above) —
+      # both are things a real login session provides automatically via
+      # systemd-logind/pam_systemd, which `sudo -u` doesn't. Both were
+      # needed; fixing only the first still left tray creation failing
+      # with the exact same PermissionDenied.
       - name: Launch VANTAGE headlessly as the isolated user, with its network cut
         run: |
-          sudo -H -u vantagetest bash -c 'dbus-run-session -- xvfb-run -a "${{ steps.find_bin.outputs.bin }}"' > launcher-stdout.log 2>&1 &
+          sudo -H -u vantagetest env "XDG_RUNTIME_DIR=/run/user/${VANTAGETEST_UID}" \
+            bash -c 'dbus-run-session -- xvfb-run -a "${{ steps.find_bin.outputs.bin }}"' > launcher-stdout.log 2>&1 &
           echo $! > launcher.pid
           sleep 2
           echo "launched pid $(cat launcher.pid)"
