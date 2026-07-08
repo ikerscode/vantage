@@ -103,12 +103,18 @@ jobs:
             See CI_REPORT.md and INSTALL.md for what's in this build, current
             signing status, and per-OS install instructions.
 
-            **Fully offline / air-gapped install**: the installers above do
-            NOT embed the container-image bundle — it's ~6.6 GiB, over 3x
-            GitHub's hard 2 GiB release-asset cap even before adding the
-            installer itself (see OFFLINE_BUNDLE_REPORT.md). Download every
-            `vantage-images-*.tar.part-*` asset plus the matching
-            `.tar.sha256` file below, then on the target machine:
+            **Most people want the plain installer above, not the bundle
+            below.** It pulls its container images from GitHub's registry
+            automatically on first launch (needs network once). See
+            INSTALL.md's "Which install do you need?" table.
+
+            **Fully offline / air-gapped install**: for machines with no
+            network access at all, the installers above do NOT embed the
+            container-image bundle — it's ~2.7 GiB (see
+            PACKAGING_V2_REPORT.md; it was 6.6 GiB before that report's size
+            fixes), still over GitHub's hard 2 GiB release-asset cap.
+            Download every `vantage-images-*.tar.part-*` asset plus the
+            matching `.tar.sha256` file below, then on the target machine:
 
             ```
             cat vantage-images-*.tar.part-* > vantage-images-1.0.0.tar
