@@ -42,7 +42,9 @@ x-hardened: &hardened
 
 services:
   db:
-    image: ${VANTAGE_DB_IMAGE:-postgis/postgis:16-3.4}
+    # -alpine (BRIEF v1.7 step 2) — see docker-compose.yml's identical
+    # comment for the rationale/verification gate.
+    image: ${VANTAGE_DB_IMAGE:-postgis/postgis:16-3.4-alpine}
     env_file: ${VANTAGE_DATA_DIR}/config/.env
     volumes:
       - ${VANTAGE_DATA_DIR}/postgres:/var/lib/postgresql/data

@@ -17,7 +17,11 @@ x-hardened: &hardened
 
 services:
   db:
-    image: postgis/postgis:16-3.4
+    # -alpine (BRIEF v1.7 step 2): smaller than the Debian-based tag by
+    # Docker Hub's own published sizes — gated on scripts/smoke.sh's real
+    # AOI-geometry/pgstac-search coverage passing unchanged against it in
+    # CI before this is trusted (see PACKAGING_V2_REPORT.md).
+    image: postgis/postgis:16-3.4-alpine
     env_file: .env
     volumes:
       - db_data:/var/lib/postgresql/data

@@ -16,7 +16,7 @@ IMAGES=(
   "vantage-tiler:$VERSION"
   "vantage-inference:$VERSION"
   "vantage-pgstac-migrate:$VERSION"
-  "postgis/postgis:16-3.4"
+  "postgis/postgis:16-3.4-alpine"
   "redis:7-alpine"
   "minio/minio:latest"
   "minio/mc:latest"

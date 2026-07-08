@@ -29,7 +29,7 @@ echo "== building with $RUNTIME, tagging version $VERSION =="
 
 # Third-party base images — pulled (not built) so save-images.sh can bundle
 # them too; docker-compose.prod.yml references these exact tags.
-"$RUNTIME" pull postgis/postgis:16-3.4
+"$RUNTIME" pull postgis/postgis:16-3.4-alpine
 "$RUNTIME" pull redis:7-alpine
 "$RUNTIME" pull minio/minio:latest
 "$RUNTIME" pull minio/mc:latest
