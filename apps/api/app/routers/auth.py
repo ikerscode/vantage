@@ -47,14 +47,25 @@ def issue_dev_token(request: Request) -> TokenResponse:
     self-hosted Keycloak; get_current_user's shape doesn't need to change.
 
     SEC-02: this endpoint hands out a valid token to anyone who can reach
-    it, no password. Two fail-closed gates: disabled entirely in production
-    (VANTAGE_ENV=production is only set on deployments where this stub has
-    no business existing at all — see COMPLIANCE.md's single-user note),
-    and loopback-only even in development (rate-limiting is a documented
+    it, no password — loopback-only is the one fail-closed gate, in every
+    environment including production (rate-limiting is a documented
     follow-up — see SECURITY_FIXES_REPORT.md).
+
+    Found for real in CI (BRIEF v1.6): this used to also 404 unconditionally
+    when VANTAGE_ENV=production, envisioning a hypothetical shared/hosted
+    deployment where this stub has no business existing. But the packaged
+    single-user desktop app *also* sets VANTAGE_ENV=production
+    (infra/.env.prod.template) and has no other auth mechanism yet — v2's
+    real OIDC/Keycloak integration doesn't exist — so that blanket
+    production disablement silently broke the packaged app's own dev-token
+    bootstrap (apps/web/src/api/auth.ts's fetchDevToken has no fallback),
+    never caught before because nobody had run the packaged app end-to-end
+    until this brief's acceptance test. docs/AIRGAP.md and COMPLIANCE.md
+    already document the desktop app as relying on exactly this stub — the
+    loopback gate alone is what actually matches that design (every
+    real-deployment app-owned service is loopback-bound already, per SEC-03
+    / docker-compose.prod.yml), so it's the only gate needed, in every env.
     """
-    if settings.vantage_env == "production":
-        raise HTTPException(status_code=404, detail="not found")
     if not _is_loopback(request):
         raise HTTPException(status_code=403, detail="dev-token is only issued to loopback clients")
     token, expires_in = create_dev_token()

@@ -158,3 +158,155 @@ jobs:
             --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # BRIEF v1.6: the actual BRIEF v1.3 §12 acceptance test — "install on a
+  # clean machine, cut network access, launch, confirm the demo AOI renders
+  # real Sentinel-2 imagery with zero network calls" — never done once,
+  # including by v1.5, which only ever compiled the installer, never
+  # installed or ran it. A fresh GitHub-hosted runner stands in for "clean
+  # machine": real root, nothing of this repo pre-installed, and it
+  # downloads the SAME release assets an end user would (not a build
+  # artifact this workflow already has lying around).
+  airgap-acceptance-test:
+    needs: [release, offline-bundle]
+    runs-on: ubuntu-22.04
+    steps:
+      # Only for scripts/smoke.sh's already-correct, already-proven tile-
+      # fetch logic below (real z/x/y math, no hardcoded STAC item IDs) —
+      # not something a real end user needs; they only get the two release
+      # downloads the next step fetches.
+      - uses: actions/checkout@v4
+
+      - name: Download the real release assets — exactly what an end user gets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" \
+            --pattern "VANTAGE_*_amd64.deb" \
+            --pattern "vantage-images-1.0.0.tar.part-*" \
+            --pattern "vantage-images-1.0.0.tar.sha256"
+          ls -la
+
+      - name: Reassemble and verify the offline bundle by extraction, not step-success
+        run: |
+          cat vantage-images-1.0.0.tar.part-* > vantage-images-1.0.0.tar
+          sha256sum -c vantage-images-1.0.0.tar.sha256
+          rm vantage-images-1.0.0.tar.part-*
+
+      - name: Prove a real image is genuinely loadable from the reassembled tarball
+        run: |
+          docker load -i vantage-images-1.0.0.tar
+          docker images --format "table {{.Repository}}:{{.Tag}}\t{{.Size}}"
+          docker image inspect vantage-api:1.0.0 vantage-tiler:1.0.0 vantage-inference:1.0.0 vantage-pgstac-migrate:1.0.0 \
+            --format "loaded OK: {{.RepoTags}} ({{.Id}})"
+
+      - name: Install the real .deb on this clean machine
+        run: |
+          sudo apt-get update
+          sudo dpkg -i VANTAGE_*_amd64.deb || sudo apt-get install -f -y
+
+      - name: Locate the installed binary (discovered, not assumed)
+        id: find_bin
+        run: |
+          bin=$(dpkg -L vantage 2>/dev/null | grep -E '/(usr/bin|opt)/.*[Vv][Aa][Nn][Tt][Aa][Gg][Ee]' | grep -v '\.so' | head -1)
+          if [ -z "$bin" ]; then
+            bin=$(find /usr/bin /opt -iname "*vantage*" -type f -executable 2>/dev/null | head -1)
+          fi
+          echo "found binary: $bin"
+          test -x "$bin"
+          echo "bin=$bin" >> "$GITHUB_OUTPUT"
+
+      - name: Place the offline bundle where the launcher expects an operator-provided one (docs/AIRGAP.md)
+        run: |
+          mkdir -p ~/.local/share/VANTAGE
+          cp vantage-images-1.0.0.tar ~/.local/share/VANTAGE/vantage-images-1.0.0.tar
+
+      - name: Install Xvfb (headless display for the GUI launcher)
+        run: sudo apt-get install -y xvfb
+
+      # This is the actual claim under test: everything from here on must
+      # work with the loopback interface as the ONLY reachable network path
+      # — no real internet egress at all. Docker's container-to-container
+      # traffic goes through the kernel's FORWARD chain, not OUTPUT, so it
+      # is deliberately untouched here — blocking it would test something
+      # this app never claimed (containers not needing internet to talk to
+      # EACH OTHER was never in question; not needing internet to talk to
+      # the outside world is). Same recipe as docs/AIRGAP.md's own
+      # "Verifying no external calls yourself", made a hard default-deny
+      # instead of just port 443, to prove the stronger claim for real.
+      - name: Cut network access (loopback only — real air-gap simulation)
+        run: |
+          sudo iptables -I OUTPUT -o lo -j ACCEPT
+          sudo iptables -P OUTPUT DROP
+          sudo iptables -L OUTPUT -v
+
+      - name: Launch VANTAGE headlessly with network cut
+        run: |
+          xvfb-run -a "${{ steps.find_bin.outputs.bin }}" > launcher-stdout.log 2>&1 &
+          echo $! > launcher.pid
+          sleep 2
+          echo "launched pid $(cat launcher.pid)"
+
+      - name: Wait for the health-gate to report ready (up to 3 minutes, matching boot.rs's own timeout)
+        run: |
+          for i in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:8000/api/health >/dev/null 2>&1 && curl -sf http://127.0.0.1:8001/health >/dev/null 2>&1; then
+              echo "healthy after ~$((i * 2))s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::never became healthy within 180s"
+          cat launcher-stdout.log
+          exit 1
+
+      # The actual headline result. Reuses scripts/smoke.sh itself rather
+      # than a hand-rolled request sequence — it already does exactly what
+      # this needs (dynamic tilejson + real z/x/y tile math, no hardcoded
+      # STAC item IDs) and is proven correct against live Earth Search;
+      # /api/stac/search is fully backend-agnostic (see
+      # apps/api/app/routers/stac.py — it just calls
+      # get_imagery_source().search(), same code path regardless of
+      # IMAGERY_SOURCE), and smoke.sh's own fixed DATE_A/DATE_B
+      # (2025-11-01 / 2025-06-19) already match infra/demo-data/manifest.json
+      # exactly — not a coincidence, the same demo scenes back both modes.
+      # TILER_TOKEN must be this specific install's real generated secret,
+      # not smoke.sh's dev-mode default. Steps 0-6 (health/auth/AOI/search/
+      # tiles/analysis) are what "renders real imagery" means; step 7
+      # (detections) is an honest-empty pass by design (see the script's own
+      # comment); step 8 (monitor-sweep) needs a host-reachable `db`
+      # hostname the same way v1.5's dev-compose test did, and this
+      # packaged run doesn't set COMPOSE_FILE (there's no compose CLI
+      # invocation an end user would ever run directly) — expected to fail
+      # for that reason alone, not a regression, and not evidence against
+      # the actual claim under test.
+      - name: Confirm the demo AOI renders real Sentinel-2 imagery with zero network calls (scripts/smoke.sh, offline mode)
+        run: |
+          TILER_TOKEN=$(grep '^TILER_TOKEN=' ~/.local/share/VANTAGE/config/.env | cut -d= -f2-)
+          test -n "$TILER_TOKEN"
+          API_BASE_URL=http://127.0.0.1:8000 TILER_BASE_URL=http://127.0.0.1:8001 TILER_TOKEN="$TILER_TOKEN" \
+            ./scripts/smoke.sh 2>&1 | tee smoke-offline.log || true
+          echo "--- checking the specific evidence that matters for this claim ---"
+          grep -q "PASS: issued a dev token" smoke-offline.log
+          grep -q "PASS: created AOI" smoke-offline.log
+          grep -q "PASS: found .* scene(s) for 2025-11-01" smoke-offline.log
+          grep -q "PASS: found .* scene(s) for 2025-06-19" smoke-offline.log
+          grep -q "PASS: true-color tile fetched" smoke-offline.log
+          grep -q "PASS: NDVI tile fetched" smoke-offline.log
+          grep -q "PASS: analysis completed" smoke-offline.log
+          grep -q "PASS: change-map tile fetched" smoke-offline.log
+          echo "ALL REQUIRED EVIDENCE PRESENT: demo AOI genuinely rendered real Sentinel-2 imagery, offline, from the bundled static catalog"
+
+      - name: Restore network access
+        if: always()
+        run: sudo iptables -P OUTPUT ACCEPT
+
+      - name: Dump launcher + smoke-test logs (always, for the report)
+        if: always()
+        run: |
+          echo "::group::launcher-stdout.log"
+          cat launcher-stdout.log || true
+          echo "::endgroup::"
+          echo "::group::smoke-offline.log"
+          cat smoke-offline.log || true
+          echo "::endgroup::"

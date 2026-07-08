@@ -24,9 +24,16 @@ pub struct HealthTarget {
 /// are proven up transitively (api/tiler won't report healthy until they
 /// can reach their own dependencies) — see apps/api/app/routers/health.py
 /// and services/tiler's equivalent.
+///
+/// api's route is mounted under `/api` (apps/api/app/main.py's
+/// `API_PREFIX`) while the tiler's isn't — found for real in CI (BRIEF
+/// v1.6): this used to poll `/health` for both, which 404s for api and
+/// would have hung the health-gate at its 3-minute timeout on every real
+/// packaged install, never caught before because nobody had actually
+/// launched the packaged app until that brief's acceptance test.
 pub fn default_targets(api_port: u16, tiler_port: u16) -> Vec<HealthTarget> {
     vec![
-        HealthTarget { name: "api", url: format!("http://localhost:{api_port}/health") },
+        HealthTarget { name: "api", url: format!("http://localhost:{api_port}/api/health") },
         HealthTarget { name: "tiler", url: format!("http://localhost:{tiler_port}/health") },
     ]
 }
@@ -63,7 +70,11 @@ mod tests {
     #[test]
     fn default_targets_use_the_ports_passed_in_not_hardcoded_ones() {
         let targets = default_targets(19000, 19001);
-        assert_eq!(targets[0].url, "http://localhost:19000/health");
+        // api is mounted under /api (apps/api/app/main.py's API_PREFIX);
+        // the tiler isn't — these are deliberately different paths, not a
+        // typo (see this function's doc comment for the real bug this
+        // caught).
+        assert_eq!(targets[0].url, "http://localhost:19000/api/health");
         assert_eq!(targets[1].url, "http://localhost:19001/health");
     }
 

@@ -8,7 +8,11 @@ check that only worked when the API ran outside a container."""
 from types import SimpleNamespace
 from unittest.mock import mock_open, patch
 
-from app.routers.auth import _container_default_gateway, _is_loopback
+import pytest
+from fastapi import HTTPException
+
+from app.routers import auth as auth_router
+from app.routers.auth import _container_default_gateway, _is_loopback, issue_dev_token
 
 # A minimal, real-shaped /proc/net/route: header line + one default-route
 # (destination 00000000) entry with gateway 0101A8C0 little-endian hex,
@@ -61,3 +65,31 @@ def test_missing_proc_net_route_fails_closed():
     with patch("builtins.open", side_effect=FileNotFoundError):
         assert _container_default_gateway() is None
         assert not _is_loopback(_request("192.168.1.1"))
+
+
+def test_dev_token_still_issued_from_loopback_in_production():
+    # Found for real in CI (BRIEF v1.6): this endpoint used to 404
+    # unconditionally in production, silently breaking the packaged
+    # desktop app's own auth bootstrap (VANTAGE_ENV=production is what
+    # infra/.env.prod.template sets, and apps/web's fetchDevToken has no
+    # fallback) — nobody had run the packaged app end-to-end before that
+    # brief's acceptance test. Loopback-only is the real gate now, in
+    # every environment.
+    original_env = auth_router.settings.vantage_env
+    auth_router.settings.vantage_env = "production"
+    try:
+        response = issue_dev_token(_request("127.0.0.1"))
+        assert response.access_token
+    finally:
+        auth_router.settings.vantage_env = original_env
+
+
+def test_dev_token_still_rejects_non_loopback_in_production():
+    original_env = auth_router.settings.vantage_env
+    auth_router.settings.vantage_env = "production"
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            issue_dev_token(_request("203.0.113.7"))
+        assert exc_info.value.status_code == 403
+    finally:
+        auth_router.settings.vantage_env = original_env

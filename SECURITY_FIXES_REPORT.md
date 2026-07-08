@@ -93,6 +93,8 @@ dev mode, loopback client:       -> 200, issues a real token (smoke.sh's own ste
 ```
 Rate-limiting is **not** implemented in this pass (see §4.3 — SlowAPI wasn't added; noted as a real gap, not silently dropped).
 
+**Update (BRIEF v1.6)**: the "404 in production" half of this was reverted — it silently broke the packaged desktop app, which also sets `VANTAGE_ENV=production` (`infra/.env.prod.template`) and has no other auth mechanism yet, never caught because nobody had run the packaged app end-to-end until that brief's clean-machine acceptance test. Loopback-only is now the sole gate, in every environment — see `apps/api/app/routers/auth.py`'s current docstring and `OFFLINE_BUNDLE_REPORT.md`.
+
 ## Phase 2 — Frontend hardening (SEC-05)
 
 ### 2.1 Self-hosted fonts

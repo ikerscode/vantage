@@ -137,7 +137,11 @@ services:
       # apps/launcher/launcher-core/src/seed.rs.
       - ${VANTAGE_DATA_DIR}/demo-data:/data/demo:ro
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      # Found for real in CI (BRIEF v1.6): api's health route is mounted
+      # under /api (apps/api/app/main.py's API_PREFIX) — docker-compose.yml
+      # (dev) already had this right; this file didn't, so this service
+      # would report perpetually unhealthy in every real packaged install.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 10s
       timeout: 5s
       retries: 10
