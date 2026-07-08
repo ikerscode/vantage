@@ -4,9 +4,20 @@ This covers installing the packaged desktop app. If you're modifying the code, s
 
 **Read this first**: VANTAGE is a heavy, workstation-class app, not a lightweight utility. Budget **8GB+ RAM** and **~10GB+ disk**. It also needs a container runtime (Docker or Podman) — the launcher detects this and guides you through installing one if it's missing.
 
-**Two downloads, not one**: the installer itself is small (see sizes below), but it does **not** include the container images (PostGIS, an object store, a tiling service, an ML inference service) — that's a real, measured ~6.6 GiB, over 3x GitHub's per-file release-asset cap (see `OFFLINE_BUNDLE_REPORT.md`). You also need the `vantage-images-1.0.0.tar.part-*` chunks from the same GitHub Release — see [docs/AIRGAP.md](docs/AIRGAP.md) for the one-time reassemble-and-place step. Without it, the app cannot start (these images are never pulled from a registry).
+## Which install do you need?
 
-**No phone-home**: nothing in this app calls out to any external service except imagery sources you explicitly configure (and by default, it's configured to use only bundled offline demo imagery — see [docs/AIRGAP.md](docs/AIRGAP.md)). No telemetry, no analytics, no update pings, no crash reporting that leaves your machine.
+There are **two real, different install paths** — pick based on whether the machine running VANTAGE will have internet access, not just habit:
+
+| | **Thin / online install** | **Air-gap bundle** |
+|---|---|---|
+| **Who it's for** | Almost everyone. If this machine has (or will briefly have) internet access, use this. | Only genuinely air-gapped deployments — the target machine has *no* network access, ever. |
+| **What you download** | Just the installer for your OS (60 MB – ~1.3 GB, see sizes below). | The installer **plus** a separate ~2.7 GiB chunked image bundle from the same GitHub Release. |
+| **First launch** | Automatically pulls the container images from GHCR (GitHub's container registry) over the network — a one-time download, then cached locally. | Loads the images from the bundle you downloaded and placed in the data directory beforehand — no network involved at any point. |
+| **If it can't get images** | Fails with a clear error telling you what to do (get network access, or fall back to the air-gap bundle) — never a silent hang. | N/A — the bundle is already there. |
+
+If you're not sure, you almost certainly want the **thin install** — just download the installer and run it. The air-gap bundle exists specifically for the case where downloading anything on the target machine itself is not possible or not allowed. See [docs/AIRGAP.md](docs/AIRGAP.md) for that path's full instructions.
+
+**No phone-home either way**: nothing in this app calls out to any external service except imagery sources you explicitly configure (and by default, it's configured to use only bundled offline demo imagery) and, for the thin install, the one-time GHCR image pull on first launch. No telemetry, no analytics, no update pings, no crash reporting that leaves your machine.
 
 ---
 
@@ -48,8 +59,11 @@ Run the installer. **Signing note**: same caveat as macOS — an unsigned `.msi`
 
 1. VANTAGE opens to a splash screen and checks for a container runtime. If none is found, it tells you exactly what to install (see the per-OS notes above) rather than failing silently.
 2. It generates unique DB/object-store/auth secrets for this install (never shared across installs, never shipped as defaults — see `PACKAGE_REPORT.md` §9).
-3. It loads the container images from the offline bundle you placed in the data directory (no registry pull, ever — see `docs/AIRGAP.md` for the one-time download-and-place step this depends on) and starts the stack, showing honest progress ("starting database… loading tiler…").
-4. Once every service reports healthy, the mission-console UI opens — with a bundled demo AOI already showing real Sentinel-2 imagery, even with no internet connection.
+3. It gets the container images, however they need to get there:
+   - **Air-gap bundle present** (you followed [docs/AIRGAP.md](docs/AIRGAP.md) and placed the reassembled tarball in your data directory first): loads from there, no network involved.
+   - **No bundle, network available** (the normal thin-install case): pulls the images from GitHub's container registry automatically — a one-time download, then cached locally for every future launch.
+   - **Neither** (no bundle, no network): fails immediately with a clear message telling you to either get network access or download the air-gap bundle — it does not hang silently trying to guess.
+4. Once every service reports healthy, the mission-console UI opens — with a bundled demo AOI already showing real Sentinel-2 imagery, even with no internet connection (the demo imagery itself is bundled in the installer either way — only the container *images* differ between the two install paths).
 
 Where things live:
 
@@ -73,7 +87,7 @@ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## Air-gapped / offline deployment
 
-See [docs/AIRGAP.md](docs/AIRGAP.md).
+Only if the target machine has no network access at all — most installs don't need this. See [docs/AIRGAP.md](docs/AIRGAP.md).
 
 ---
 
@@ -92,18 +106,30 @@ npm install
 npm run build   # -> src-tauri/target/release/bundle/{deb,appimage,msi,dmg}/...
 cd ../..
 
-# 3. Build + tag the container images, then bundle them for offline
-#    distribution. NOT added to tauri.conf.json's bundle.resources — the
-#    real tarball is ~6.6 GiB, over 3x GitHub's per-file release-asset cap
-#    (see OFFLINE_BUNDLE_REPORT.md), so it ships as separate chunked
-#    downloads next to the installer, not embedded inside it.
+# 3. Build + tag the container images.
 VANTAGE_VERSION=1.0.0 ./scripts/package/build-images.sh
+
+# 4. Push them to GHCR — this is what makes the THIN install work: a
+#    normal install pulls these automatically on first launch, no bundle
+#    needed. (One-time operator step required before this is reachable by
+#    an anonymous pull: GHCR packages default to private regardless of
+#    repo visibility — see PACKAGING_V2_REPORT.md.)
+for img in vantage-api vantage-tiler vantage-inference vantage-pgstac-migrate; do
+  docker tag "$img:1.0.0" "ghcr.io/ikerscode/$img:1.0.0"
+  docker push "ghcr.io/ikerscode/$img:1.0.0"
+done
+
+# 5. Bundle the same images for the AIR-GAP install path. NOT added to
+#    tauri.conf.json's bundle.resources — the real tarball is ~2.7 GiB
+#    (down from 6.6 GiB — see PACKAGING_V2_REPORT.md), still over
+#    GitHub's per-file release-asset cap, so it ships as separate chunked
+#    downloads next to the installer, not embedded inside it.
 VANTAGE_VERSION=1.0.0 ./scripts/package/save-images.sh
 VANTAGE_VERSION=1.0.0 ./scripts/package/split-images.sh
 # -> writes infra/vantage-images-1.0.0.tar.part-* + a .sha256 file.
-#    Distribute the installer from step 2 AND every .tar.part-*/.sha256
-#    file from this step together (see docs/AIRGAP.md for what the
-#    end user does with them).
+#    Distribute the installer from step 2 on its own for the thin path,
+#    or the installer AND every .tar.part-*/.sha256 file together for the
+#    air-gap path (see docs/AIRGAP.md for what the end user does with them).
 ```
 
 Linux build machines need (once, via your package manager — not needed at runtime by an end user, only to *compile* the launcher):

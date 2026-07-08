@@ -37,7 +37,7 @@
       "../../../infra/demo-data/": "infra/demo-data/"
     },
     "externalBin": [],
-    "longDescription": "VANTAGE is a self-hostable satellite-imagery analysis workbench: change detection and placeholder object detection over Sentinel-2 imagery, for defense/ISR analysts. Analysis only — see COMPLIANCE.md. This installer brings up a full container stack (PostGIS, a tiling service, and a placeholder ML detector) plus demo Sentinel-2 imagery so the app is usable fully offline once the separate container-image bundle from the same release has been downloaded and placed in the data directory — see docs/AIRGAP.md.",
+    "longDescription": "VANTAGE is a self-hostable satellite-imagery analysis workbench: change detection and placeholder object detection over Sentinel-2 imagery, for defense/ISR analysts. Analysis only — see COMPLIANCE.md. This installer brings up a full container stack (PostGIS, a tiling service, and a placeholder ML detector) plus demo Sentinel-2 imagery. On first launch it pulls the container images automatically if this machine has network access; for genuinely air-gapped deployments, a separate offline image bundle from the same release can be downloaded and placed in the data directory instead — see INSTALL.md and docs/AIRGAP.md.",
     "shortDescription": "Satellite-imagery analysis workbench (desktop)",
     "category": "Utility"
   }

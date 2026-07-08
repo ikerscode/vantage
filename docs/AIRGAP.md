@@ -1,13 +1,15 @@
 # Air-gapped / offline deployment
 
-VANTAGE's core invariant (see `CLAUDE.md`) is that it never has a hard runtime dependency on external SaaS. The packaged desktop app takes this further: once the container images are loaded (see below), it works with networking disabled entirely, from first launch.
+**This document is for the deliberate air-gap install path.** Most people installing VANTAGE should just use the plain installer — it pulls what it needs from GitHub's container registry automatically on first launch, no extra download or setup. Use this path specifically when the machine running VANTAGE will have **no network access at all**, ever — see `INSTALL.md`'s "Which install do you need?" section if you haven't already decided which path applies to you.
+
+VANTAGE's core invariant (see `CLAUDE.md`) is that it never has a hard runtime dependency on external SaaS. This install path takes that furthest: once the container images are loaded (see below), it works with networking disabled entirely, from first launch, forever.
 
 ## Two downloads, not one
 
-The installer (`.deb`/`.AppImage`/`.dmg`/`.msi`) does **not** embed the container images — the real, measured tarball is ~6.6 GiB (see `OFFLINE_BUNDLE_REPORT.md`), over 3x GitHub's hard 2 GiB release-asset cap, and embedding it would balloon every installer to match. This is normal for air-gapped software distribution, not a shortcut: you get **two things from the same GitHub Release**:
+The installer (`.deb`/`.AppImage`/`.dmg`/`.msi`) does **not** embed the container images — the real, measured tarball is ~2.7 GiB (see `PACKAGING_V2_REPORT.md`; it was ~6.6 GiB before that report's size fixes), still over GitHub's hard 2 GiB release-asset cap, and embedding it would balloon every installer to match even for people who don't need it. This is normal for air-gapped software distribution, not a shortcut: for this path, you get **two things from the same GitHub Release**:
 
 1. The installer for your OS — small, fast to download, installs normally.
-2. `vantage-images-1.0.0.tar.part-*` (several chunks) + `vantage-images-1.0.0.tar.sha256` — the offline container-image bundle. On a **networked** machine:
+2. `vantage-images-1.0.0.tar.part-*` (a couple of chunks) + `vantage-images-1.0.0.tar.sha256` — the offline container-image bundle. On a **networked** machine:
 
    ```bash
    cat vantage-images-1.0.0.tar.part-* > vantage-images-1.0.0.tar
@@ -16,7 +18,7 @@ The installer (`.deb`/`.AppImage`/`.dmg`/`.msi`) does **not** embed the containe
 
    Then carry the reassembled `vantage-images-1.0.0.tar` to the air-gapped target via your approved media (USB, etc.) and place it in VANTAGE's data directory (see `INSTALL.md`'s table — e.g. `~/.local/share/VANTAGE` on Linux) **before first launch**. `apps/launcher/launcher-core/src/images.rs` checks that location automatically and loads it (`docker`/`podman load`, not a registry pull) on next start — see `scripts/package/save-images.sh`/`split-images.sh`.
 
-Without this step, the packaged app cannot start at all: these images are never pushed to any registry (see `scripts/package/build-images.sh`), so `docker compose up` has nothing to pull if the images were never loaded.
+Without this step, an air-gapped machine's install can't start: these images are never pushed anywhere reachable without network access. (A **networked** install doesn't need this at all — `images.rs` falls back to pulling the same images from GHCR automatically; see `PACKAGING_V2_REPORT.md`.)
 
 ## What "offline by default" actually means here
 
