@@ -257,9 +257,17 @@ jobs:
           sudo iptables -A OUTPUT -m owner --uid-owner vantagetest -j DROP
           sudo iptables -L OUTPUT -v
 
+      # Found for real in CI (this attempt): the tray icon (built in
+      # main.rs's setup() hook, via `?` — a failure there aborts the whole
+      # setup closure before boot::run()'s thread is ever spawned) needs a
+      # D-Bus session bus. `vantagetest` has no real login session to
+      # provide one, so the launcher panicked at startup — the health-gate
+      # loop below then spent its entire budget waiting on a process that
+      # had already exited. dbus-run-session is the standard fix for
+      # exactly this in headless Linux GUI testing.
       - name: Launch VANTAGE headlessly as the isolated user, with its network cut
         run: |
-          sudo -H -u vantagetest bash -c 'xvfb-run -a "${{ steps.find_bin.outputs.bin }}"' > launcher-stdout.log 2>&1 &
+          sudo -H -u vantagetest bash -c 'dbus-run-session -- xvfb-run -a "${{ steps.find_bin.outputs.bin }}"' > launcher-stdout.log 2>&1 &
           echo $! > launcher.pid
           sleep 2
           echo "launched pid $(cat launcher.pid)"
