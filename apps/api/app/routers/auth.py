@@ -1,3 +1,6 @@
+import socket
+import struct
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.core.config import settings
@@ -7,9 +10,34 @@ from app.schemas.auth import TokenResponse, UserClaims
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _container_default_gateway() -> str | None:
+    """The address Docker's NAT makes a host-loopback client look like it's
+    coming from, from inside this container — found for real in CI (BRIEF
+    v1.5): a host process hitting the published port at 127.0.0.1 never
+    reaches uvicorn as 127.0.0.1, because Docker's port-publish path
+    masquerades it as the bridge gateway address (real loopback doesn't
+    survive the NAT hop). Native/non-container dev never exercised this.
+    A sibling container calling api:8000 directly over the compose network
+    presents its OWN container IP here, not the gateway's, so keying on
+    this exact address (not the whole bridge subnet) doesn't widen the gate
+    to other containers — only to "the host, via its published port."
+    """
+    try:
+        with open("/proc/net/route") as f:
+            for line in f.readlines()[1:]:
+                fields = line.strip().split()
+                if fields[1] == "00000000":  # destination 0.0.0.0 == default route
+                    return socket.inet_ntoa(struct.pack("<L", int(fields[2], 16)))
+    except (FileNotFoundError, IndexError, ValueError):
+        return None
+    return None
+
+
 def _is_loopback(request: Request) -> bool:
     host = (request.client.host if request.client else None) or ""
-    return host in ("127.0.0.1", "::1", "localhost")
+    if host in ("127.0.0.1", "::1", "localhost"):
+        return True
+    return host != "" and host == _container_default_gateway()
 
 
 @router.post("/dev-token", response_model=TokenResponse)
