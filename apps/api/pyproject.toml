@@ -25,7 +25,7 @@ dependencies = [
     "pyjwt~=2.9",
     "httpx~=0.27",
     "croniter~=2.0",
-    "pillow~=10.3",
+    "pillow~=12.2",  # 10.4.0 had 6 known CVEs (pip-audit, CI security-scan job) — 12.2.0+ fixes all of them
 ]
 
 [project.optional-dependencies]

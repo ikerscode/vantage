@@ -1,5 +1,15 @@
 FROM python:3.11-slim
 
+# rasterio's manylinux wheel bundles GDAL/PROJ/GEOS/SQLite itself, but still
+# dynamically links a couple of small system libraries at runtime that
+# python:3.11-slim's minimal Debian base doesn't include. Found for real by
+# BRIEF v1.5's CI (this Dockerfile had never been built by an actual
+# container runtime before that — see CI_REPORT.md):
+#   ImportError: libexpat.so.1: cannot open shared object file
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libexpat1 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
 # SEC-06: never run as root — this process fetches and parses attacker-
 # reachable URLs (see app/security.py's SSRF hardening), so it's exactly
 # the kind of process where a bug turning into container-root would matter.
