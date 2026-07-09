@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useAois, useArchiveAoi, useCreateAoi } from "../api/aois";
-import { polygonAreaKm2 } from "../lib/geo";
+import { polygonAreaKm2, polygonCentroid } from "../lib/geo";
 import { useAnalysisStore } from "../store/analysisStore";
 import { useAoiStore } from "../store/aoiStore";
 import { useMapStore } from "../store/mapStore";
@@ -19,8 +19,27 @@ export function AOIPanel() {
   const setIsDrawing = useAoiStore((s) => s.setIsDrawing);
   const setInspectorTarget = useAnalysisStore((s) => s.setInspectorTarget);
   const setMode = useMapStore((s) => s.setMode);
+  const requestFlyTo = useMapStore((s) => s.requestFlyTo);
 
   const [draftName, setDraftName] = useState("");
+
+  // First-launch UX: INSTALL.md/docs/AIRGAP.md both promise the bundled demo
+  // AOI shows real imagery on open, with no manual step — before this, the
+  // map had no way to navigate to ANY AOI except a manual coordinate search
+  // (found for real: a fresh install genuinely showed nothing but a black
+  // map until the user happened to click the AOI row). Auto-selects and
+  // flies to the first AOI exactly once per session, only if nothing is
+  // already selected — never overrides a user's own subsequent choices.
+  const hasAutoNavigated = useRef(false);
+  useEffect(() => {
+    if (hasAutoNavigated.current || !aois || aois.length === 0 || selectedAoiId !== null) return;
+    hasAutoNavigated.current = true;
+    const first = aois[0];
+    setSelectedAoiId(first.id);
+    setInspectorTarget({ kind: "aoi", id: first.id });
+    const { longitude, latitude } = polygonCentroid(first.geometry);
+    requestFlyTo({ longitude, latitude, zoom: 12 });
+  }, [aois, selectedAoiId, setSelectedAoiId, setInspectorTarget, requestFlyTo]);
 
   const handleSave = () => {
     if (!draftGeometry || !draftName.trim()) return;
@@ -104,6 +123,8 @@ export function AOIPanel() {
                 onClick={() => {
                   setSelectedAoiId(aoi.id);
                   setInspectorTarget({ kind: "aoi", id: aoi.id });
+                  const { longitude, latitude } = polygonCentroid(aoi.geometry);
+                  requestFlyTo({ longitude, latitude, zoom: 12 });
                 }}
               >
                 <div className="row-bar" style={{ background: active ? "var(--accent)" : "transparent" }} />
