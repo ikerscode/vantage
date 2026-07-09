@@ -7,7 +7,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     device: str = "cpu"  # "cpu" | "cuda" — GPU-ready, CPU default per CLAUDE.md
+    # "torchvision_fasterrcnn" (default): COCO-pretrained placeholder, generic
+    # classes, proves the pipeline. "torchvision_fasterrcnn_vessel" (BRIEF
+    # v1.8, opt-in): fine-tuned on real Sentinel-2 vessel annotations — see
+    # VESSEL_DETECTION_REPORT.md for the honest accuracy/limitations story.
     model_backend: str = "torchvision_fasterrcnn"
+    vessel_weights_path: str = "/app/weights/vessel_fasterrcnn.pth"
     score_threshold: float = 0.5
 
     # SEC-09

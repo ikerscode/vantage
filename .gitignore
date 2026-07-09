@@ -45,3 +45,18 @@ infra/db-init/01-roles.sql
 run_artifacts/
 
 # Docker / data volumes bind-mounted locally (none tracked; compose uses named volumes)
+
+# Fine-tuned model weights (BRIEF v1.8) — 165.7MB, over GitHub's 100MB
+# per-file push limit without git-lfs. Reproducible via
+# scripts/train_vessel_detector/{prepare_dataset,train}.py — see
+# VESSEL_DETECTION_REPORT.md. services/inference/weights/README.md (NOT
+# ignored) documents this; the directory itself must stay trackable so the
+# Dockerfile's directory-level COPY doesn't fail on a checkout that lacks
+# the real .pth (default builds only ever use the COCO backend anyway).
+services/inference/weights/*.pth
+
+# Training data-prep scratch (BRIEF v1.8) — downloaded annotations + fetched
+# Sentinel-2 chips + training artifacts, all real but not meant to live in
+# git history; reproducible via prepare_dataset.py/train.py/evaluate.py.
+scripts/train_vessel_detector/data/
+scripts/train_vessel_detector/.venv/

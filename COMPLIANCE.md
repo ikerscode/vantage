@@ -12,7 +12,7 @@ VANTAGE reports **what is present** and **what changed** in overhead imagery. It
 
 This is a hard invariant, not a v1-vs-v2 scoping question — it never becomes in scope. Anyone extending this codebase should treat code review against this boundary (the ITAR/USML analysis-vs-targeting line) as a first-class check, not an afterthought.
 
-The placeholder object detector (`services/inference`) classifies generic COCO categories (people, vehicles, etc. — whatever a stock pretrained model recognizes) purely to demonstrate the detection pipeline's plumbing (chip extraction → inference call → geo-referenced bounding box → persisted `Detection` row). It is not tuned for, and makes no claim of being fit for, any operational identification or classification task.
+`services/inference` exposes two selectable detector backends (`MODEL_BACKEND` env var). The default, `torchvision_fasterrcnn`, classifies generic COCO categories (people, vehicles, etc. — whatever a stock pretrained model recognizes) purely to demonstrate the detection pipeline's plumbing (chip extraction → inference call → geo-referenced bounding box → persisted `Detection` row); it is not tuned for, and makes no claim of being fit for, any operational identification or classification task. The opt-in `torchvision_fasterrcnn_vessel` (BRIEF v1.8) is fine-tuned on real, licensed Sentinel-2 vessel annotations and reports genuine (if imperfect) detection accuracy — see `VESSEL_DETECTION_REPORT.md` for the honest precision/recall numbers and failure modes. Neither is, or claims to be, anything beyond point/box detection of vessel presence and location — see "Analysis only" above.
 
 ## Self-hostable / air-gappable
 
@@ -26,8 +26,8 @@ No component in the core request path has a hard runtime dependency on external 
 
 ## Licensing posture
 
-- **Object detector**: `torchvision.models.detection.fasterrcnn_resnet50_fpn`, BSD-3-licensed, COCO-pretrained weights. **Ultralytics YOLO (AGPL-3.0) is explicitly not used anywhere in this codebase** — AGPL's copyleft terms are incompatible with a proprietary product, per `CLAUDE.md`'s locked constraints.
-- **Training data**: no overhead-imagery dataset (xView or similar) is bundled or referenced. Such datasets are frequently non-commercial-licensed, and selecting one is deliberately deferred as a later, licensing-sensitive decision — not something to bake in casually during scaffolding.
+- **Object detector**: `torchvision.models.detection.fasterrcnn_resnet50_fpn`, BSD-3-licensed, for both selectable backends above. **Ultralytics YOLO (AGPL-3.0) is explicitly not used anywhere in this codebase** — AGPL's copyleft terms are incompatible with a proprietary product, per `CLAUDE.md`'s locked constraints. Re-confirmed during BRIEF v1.8's dataset research: a YOLOv8 model trained on the same vessel dataset used below was found and correctly ruled out for this reason — the license restriction was on that model, not on the underlying dataset, which remained usable.
+- **Training data**: no overhead-imagery dataset is bundled for the default backend. The opt-in vessel backend's training data (Zenodo 15019034, CC BY 4.0 — see `VESSEL_DETECTION_REPORT.md`) is the one deliberate exception, license-researched and documented, not baked in casually — acceptable specifically because this is a portfolio piece rather than a commercial product (non-commercial-friendly licensing is fine here; it would need reassessment before any commercial redistribution). The original xView dataset (CC BY-NC-SA 4.0) remains unused — resolution-mismatched for most classes at Sentinel-2's ~10m GSD.
 - **Everything else**: FastAPI, SQLAlchemy, PostGIS, TiTiler/rio-tiler, MapLibre GL, deck.gl, Zustand, TanStack Query — all permissively licensed (MIT/BSD/Apache-2.0-family), consistent with a self-hostable, non-copyleft-encumbered product.
 
 ## Status

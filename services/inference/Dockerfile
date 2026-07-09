@@ -22,8 +22,21 @@ RUN pip install --no-cache-dir --no-deps .
 # runtime re-download attempt that breaks the air-gap guarantee.
 ENV TORCH_HOME=/app/.cache/torch
 RUN mkdir -p "$TORCH_HOME" \
-    && python -c "from torchvision.models.detection import fasterrcnn_resnet50_fpn; fasterrcnn_resnet50_fpn(weights='DEFAULT')" \
-    && chown -R vantage:vantage /app
+    && python -c "from torchvision.models.detection import fasterrcnn_resnet50_fpn; fasterrcnn_resnet50_fpn(weights='DEFAULT')"
+
+# BRIEF v1.8: fine-tuned Sentinel-2 vessel-detection weights (opt-in via
+# MODEL_BACKEND=torchvision_fasterrcnn_vessel — TorchvisionFasterRCNN/COCO
+# stays the default and needs nothing from this directory). Directory-level
+# COPY, not a specific-file COPY: the real vessel_fasterrcnn.pth (165.7MB,
+# see weights/README.md) is gitignored, so most checkouts only have that
+# README here — a specific-file COPY would fail the build entirely for
+# everyone not opting into the vessel backend. This way the default build
+# (COCO-only) always succeeds; TorchvisionFasterRCNNVessel itself raises a
+# clear, actionable error at startup if selected without the real weights
+# actually present (see app/models/torchvision_fasterrcnn_vessel.py).
+COPY services/inference/weights/ /app/weights/
+
+RUN chown -R vantage:vantage /app
 
 # SEC-06: read_only (compose) means no writable filesystem for pyc caching
 # at import time — harmless either way, but this skips even trying.
