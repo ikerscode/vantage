@@ -141,12 +141,28 @@ pub fn run(app: AppHandle, data_dir: PathBuf, api_port: u16, tiler_port: u16, db
     let runner = runner_guard.as_ref().expect("just set above");
 
     match runner.up() {
+        // BRIEF v1.8, found for real on a user's Podman install: a non-zero
+        // exit here does NOT necessarily mean the stack is unusable — some
+        // compose providers (confirmed: podman-compose 1.5.0, the standalone
+        // Python tool podman delegates to when no native compose plugin is
+        // present) have known bugs tracking `condition:
+        // service_completed_successfully` dependencies across one-shot
+        // containers (pgstac-migrate/minio-init/api-migrate/demo-seed here),
+        // causing `up -d` to report a dependency-tracking error even though
+        // every service that matters came up and is genuinely healthy. The
+        // health-gate poll below is the actual source of truth (this
+        // function's own long-standing design, per the comment on
+        // compose.rs's `up()`) — so a failed exit status is logged and
+        // surfaced as a warning, not treated as fatal on its own. Only the
+        // health-gate timeout below can still fail the boot for real.
         Ok(output) if !output.status.success() => {
-            emit_failed(
+            emit_progress(
                 &app,
-                format!("compose up failed:\n{}", String::from_utf8_lossy(&output.stderr)),
+                format!(
+                    "warning: compose reported an error (continuing to check real service health): {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ),
             );
-            return;
         }
         Err(e) => {
             emit_failed(&app, format!("couldn't run compose: {e}"));
