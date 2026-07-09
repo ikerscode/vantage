@@ -28,7 +28,7 @@ If you're not sure, you almost certainly want the **thin install** — just down
 | RAM | 8 GB (16 GB recommended if you'll run real analyses, not just the demo) |
 | Disk | 10 GB free (more if you point it at a real imagery archive later) |
 | OS | Linux (recent, glibc-based), macOS 12+, or Windows 10/11 |
-| Container runtime | Docker Desktop / Docker Engine, or Podman 4+ |
+| Container runtime | Docker Desktop / Docker Engine (includes Compose), or Podman 4+ **with** a compose provider (`podman-compose`, or Podman's own `compose` subcommand) |
 
 ## Install
 
@@ -38,7 +38,7 @@ If you're not sure, you almost certainly want the **thin install** — just down
 sudo dpkg -i vantage_1.0.0_amd64.deb
 ```
 
-If you don't already have a container runtime: `sudo apt install podman` (or install Docker per Docker's own instructions — the launcher works with either).
+If you don't already have a container runtime: `sudo apt install podman podman-compose` (found for real on a user's machine, BRIEF v1.8: `podman` alone isn't enough — the launcher also needs a compose provider, either Podman's own `compose` subcommand or the standalone `podman-compose`, and a plain `apt install podman` doesn't pull either one in automatically on Ubuntu). Or install Docker per Docker's own instructions — the launcher works with either.
 
 ### Linux — `.AppImage` (portable, no install step)
 
