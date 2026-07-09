@@ -31,7 +31,16 @@ use tauri_plugin_opener::OpenerExt;
 use vantage_launcher_core::config::{default_data_dir, find_available_port, FrontendRuntimeConfig};
 use vantage_launcher_core::support_bundle;
 
-use crate::state::{LauncherState, SERVICES};
+use crate::state::{BootStatus, LauncherState, SERVICES};
+
+/// Lets splash.html pull the CURRENT boot status the moment it loads,
+/// instead of only passively waiting for events it may have missed if
+/// boot::run already progressed or failed before the page finished
+/// loading — see state.rs's BootStatus doc comment for why this exists.
+#[tauri::command]
+fn get_boot_status(state: tauri::State<LauncherState>) -> BootStatus {
+    state.last_status.lock().expect("last_status mutex poisoned").clone()
+}
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -44,6 +53,7 @@ fn main() {
         // stdout, so `log::info!`/`log::error!` calls in boot.rs land
         // somewhere a support engineer can actually find after the fact.
         .plugin(tauri_plugin_log::Builder::default().build())
+        .invoke_handler(tauri::generate_handler![get_boot_status])
         .setup(|app| {
             let data_dir = default_data_dir().expect("could not resolve a per-OS app data directory");
 
@@ -51,6 +61,7 @@ fn main() {
                 data_dir: data_dir.clone(),
                 app_version: APP_VERSION.to_string(),
                 runner: Mutex::new(None),
+                last_status: Mutex::new(BootStatus::Progress { message: "starting…".to_string() }),
             });
 
             // Chosen once, up front, so the injected runtime config (below)

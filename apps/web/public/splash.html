@@ -77,15 +77,37 @@
       const statusEl = document.getElementById("status");
       const errorEl = document.getElementById("error");
 
+      function showFailed(message) {
+        document.querySelector(".mark").style.display = "none";
+        statusEl.textContent = "startup failed";
+        errorEl.style.display = "block";
+        errorEl.textContent = message;
+      }
+
       if (window.__TAURI__) {
+        // BRIEF v1.8, found for real on a user's machine: boot::run starts
+        // on a background thread the moment the app launches, and can fail
+        // fast (confirmed: within ~4 seconds) — faster than this page is
+        // guaranteed to have finished loading and attached the listeners
+        // below. Tauri does not buffer/replay events for a listener that
+        // attaches late, so a fast failure could be emitted and silently
+        // lost, leaving this page stuck on its static default text forever
+        // with no indication anything happened. Querying current status
+        // once on load closes that race regardless of timing; the listeners
+        // below still handle everything that happens AFTER this point.
+        window.__TAURI__.core.invoke("get_boot_status").then((status) => {
+          if (status.kind === "Failed") {
+            showFailed(status.message);
+          } else {
+            statusEl.textContent = status.message;
+          }
+        });
+
         window.__TAURI__.event.listen("vantage://boot-progress", (event) => {
           statusEl.textContent = event.payload.message;
         });
         window.__TAURI__.event.listen("vantage://boot-failed", (event) => {
-          document.querySelector(".mark").style.display = "none";
-          statusEl.textContent = "startup failed";
-          errorEl.style.display = "block";
-          errorEl.textContent = event.payload.message;
+          showFailed(event.payload.message);
         });
       } else {
         // Opened directly in a browser (dev-time preview of this file only,

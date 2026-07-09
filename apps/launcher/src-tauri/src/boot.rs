@@ -11,7 +11,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use vantage_launcher_core::{compose, health, images, runtime_detect, secrets, seed};
 
-use crate::state::LauncherState;
+use crate::state::{BootStatus, LauncherState};
 
 // Found for real in CI (BRIEF v1.6's clean-machine acceptance test): a
 // cold boot of the full stack (db -> pgstac-migrate -> api-migrate ->
@@ -34,15 +34,26 @@ struct BootFailed {
     message: String,
 }
 
+// Recording into LauncherState.last_status (not just emitting the Tauri
+// event) is what lets a late-loading splash page catch up via
+// get_boot_status instead of silently missing a fast failure — see
+// state.rs's BootStatus doc comment.
+fn record_status(app: &AppHandle, status: BootStatus) {
+    let state = app.state::<LauncherState>();
+    *state.last_status.lock().expect("last_status mutex poisoned") = status;
+}
+
 fn emit_progress(app: &AppHandle, message: impl Into<String>) {
     let message = message.into();
     log::info!("{message}");
+    record_status(app, BootStatus::Progress { message: message.clone() });
     let _ = app.emit("vantage://boot-progress", BootProgress { message });
 }
 
 fn emit_failed(app: &AppHandle, message: impl Into<String>) {
     let message = message.into();
     log::error!("{message}");
+    record_status(app, BootStatus::Failed { message: message.clone() });
     let _ = app.emit("vantage://boot-failed", BootFailed { message });
 }
 
