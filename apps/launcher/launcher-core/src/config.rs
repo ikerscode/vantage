@@ -44,14 +44,33 @@ pub struct FrontendRuntimeConfig {
     /// see StatusStrip.tsx.
     #[serde(rename = "appVersion")]
     pub app_version: String,
+    /// BRIEF v1.8, found for real on a Podman user's machine: the API's
+    /// dev-token endpoint gates on "is this caller loopback", determined
+    /// via a container-runtime-specific network heuristic that doesn't
+    /// generalize to every runtime (confirmed: works under Docker, not
+    /// under Podman's rootless networking). This per-install secret is
+    /// the portable alternative — same pattern as tiler_token/
+    /// inference_token (apps/api/app/core/config.py) — presented as a
+    /// header on the dev-token call (apps/web/src/api/auth.ts) as an
+    /// ADDITIONAL accepted path, not a replacement for the loopback
+    /// check. Empty string for non-Tauri deployments (plain
+    /// docker-compose), where the existing loopback check already works.
+    #[serde(rename = "devTokenSecret")]
+    pub dev_token_secret: String,
 }
 
 impl FrontendRuntimeConfig {
-    pub fn for_ports(api_port: u16, tiler_port: u16, app_version: impl Into<String>) -> Self {
+    pub fn for_ports(
+        api_port: u16,
+        tiler_port: u16,
+        app_version: impl Into<String>,
+        dev_token_secret: impl Into<String>,
+    ) -> Self {
         Self {
             api_base_url: format!("http://localhost:{api_port}"),
             tiler_base_url: format!("http://localhost:{tiler_port}"),
             app_version: app_version.into(),
+            dev_token_secret: dev_token_secret.into(),
         }
     }
 
@@ -77,16 +96,17 @@ mod tests {
 
     #[test]
     fn frontend_runtime_config_matches_apps_web_schema() {
-        let cfg = FrontendRuntimeConfig::for_ports(18000, 18001, "0.1.0");
+        let cfg = FrontendRuntimeConfig::for_ports(18000, 18001, "0.1.0", "sekret");
         let json = cfg.to_json_string();
         assert!(json.contains("\"apiBaseUrl\": \"http://localhost:18000\""));
         assert!(json.contains("\"tilerBaseUrl\": \"http://localhost:18001\""));
         assert!(json.contains("\"appVersion\": \"0.1.0\""));
+        assert!(json.contains("\"devTokenSecret\": \"sekret\""));
     }
 
     #[test]
     fn init_script_is_a_single_valid_assignment_statement() {
-        let cfg = FrontendRuntimeConfig::for_ports(8000, 8001, "0.1.0");
+        let cfg = FrontendRuntimeConfig::for_ports(8000, 8001, "0.1.0", "sekret");
         let script = cfg.to_init_script();
         assert!(script.starts_with("window.__VANTAGE_RUNTIME_CONFIG__ = {"));
         assert!(script.trim_end().ends_with("};"));

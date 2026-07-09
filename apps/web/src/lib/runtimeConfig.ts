@@ -17,6 +17,12 @@ export interface RuntimeConfig {
   apiBaseUrl: string;
   tilerBaseUrl: string;
   appVersion: string | null;
+  /** BRIEF v1.8: see apps/api/app/routers/auth.py's _has_valid_dev_token_secret
+   * doc comment — a portable alternative to the loopback-only network check
+   * for /api/auth/dev-token, needed because that check doesn't generalize to
+   * every container runtime (found for real: fails under Podman). Empty for
+   * the plain docker-compose path, where the network check already works. */
+  devTokenSecret: string;
 }
 
 declare global {
@@ -29,6 +35,7 @@ const FALLBACK: RuntimeConfig = {
   apiBaseUrl: "http://localhost:8000",
   tilerBaseUrl: "http://localhost:8001",
   appVersion: null,
+  devTokenSecret: "",
 };
 
 let cached: RuntimeConfig | null = null;
@@ -42,6 +49,7 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
       apiBaseUrl: injected.apiBaseUrl ?? FALLBACK.apiBaseUrl,
       tilerBaseUrl: injected.tilerBaseUrl ?? FALLBACK.tilerBaseUrl,
       appVersion: injected.appVersion ?? null,
+      devTokenSecret: injected.devTokenSecret ?? FALLBACK.devTokenSecret,
     };
     return cached;
   }
@@ -54,6 +62,7 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
       apiBaseUrl: data.apiBaseUrl ?? FALLBACK.apiBaseUrl,
       tilerBaseUrl: data.tilerBaseUrl ?? FALLBACK.tilerBaseUrl,
       appVersion: data.appVersion ?? null,
+      devTokenSecret: data.devTokenSecret ?? FALLBACK.devTokenSecret,
     };
   } catch {
     // Missing/unreachable runtime-config.json shouldn't hard-fail the app —

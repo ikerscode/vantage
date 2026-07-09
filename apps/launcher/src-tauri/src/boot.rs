@@ -61,7 +61,20 @@ fn emit_failed(app: &AppHandle, message: impl Into<String>) {
 /// is blocking I/O (subprocess calls, HTTP polls), deliberately not async,
 /// to keep this module (and launcher-core underneath it) trivially
 /// testable without pulling in an async runtime.
-pub fn run(app: AppHandle, data_dir: PathBuf, api_port: u16, tiler_port: u16, db_port: u16) {
+///
+/// `config_paths` is computed by main.rs's setup hook BEFORE this thread is
+/// even spawned (BRIEF v1.8) — the frontend's dev-token secret needs to be
+/// baked into the window's initialization_script at window-creation time,
+/// which happens before this function ever runs, so config generation
+/// (which produces that secret) can no longer happen in here.
+pub fn run(
+    app: AppHandle,
+    data_dir: PathBuf,
+    config_paths: secrets::ConfigPaths,
+    api_port: u16,
+    tiler_port: u16,
+    db_port: u16,
+) {
     emit_progress(&app, "checking for a container runtime…");
     let Some(runtime) = runtime_detect::detect() else {
         emit_failed(
@@ -73,24 +86,6 @@ pub fn run(app: AppHandle, data_dir: PathBuf, api_port: u16, tiler_port: u16, db
     };
     emit_progress(&app, format!("using {runtime:?}"));
 
-    emit_progress(&app, "preparing configuration…");
-    let opts = secrets::DeploymentOptions {
-        data_dir: data_dir.clone(),
-        api_port,
-        tiler_port,
-        db_port,
-        api_image: "vantage-api:1.0.0".into(),
-        tiler_image: "vantage-tiler:1.0.0".into(),
-        inference_image: "vantage-inference:1.0.0".into(),
-        inference_device: "cpu".into(),
-    };
-    let config_paths = match secrets::ensure_config(&opts) {
-        Ok(p) => p,
-        Err(e) => {
-            emit_failed(&app, format!("couldn't write config to {}: {e}", data_dir.display()));
-            return;
-        }
-    };
     if config_paths.freshly_generated {
         emit_progress(&app, "generated new per-install secrets");
     }

@@ -29,7 +29,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 use vantage_launcher_core::config::{default_data_dir, find_available_port, FrontendRuntimeConfig};
-use vantage_launcher_core::secrets::read_rendered_value;
+use vantage_launcher_core::secrets::{self, read_rendered_value};
 use vantage_launcher_core::support_bundle;
 
 use crate::state::{BootStatus, LauncherState, SERVICES};
@@ -104,7 +104,36 @@ fn main() {
             // resolve_ports's doc comment for the real bug this fixes.
             let (api_port, tiler_port, db_port) = resolve_ports(&data_dir);
 
-            let runtime_config = FrontendRuntimeConfig::for_ports(api_port, tiler_port, APP_VERSION);
+            // BRIEF v1.8: config (including per-install secrets) must exist
+            // BEFORE the window is built, not just before compose up — the
+            // frontend's dev-token secret needs to be baked into the SAME
+            // initialization_script that already carries its api/tiler
+            // ports, and that script runs once, at window-creation time,
+            // before splash.html's own JS. This used to happen later, inside
+            // boot::run on its background thread — moved up here instead;
+            // boot::run now receives the already-computed ConfigPaths rather
+            // than generating it itself. Pure local file I/O (no network/
+            // container calls), so this doesn't meaningfully delay showing
+            // the window — same class of rare, unrecoverable early failure
+            // as default_data_dir() above (disk full/permissions), so
+            // handled the same way (a hard, clear panic, not a graceful
+            // splash-screen message there'd be no window yet to show it on).
+            let config_paths = secrets::ensure_config(&secrets::DeploymentOptions {
+                data_dir: data_dir.clone(),
+                api_port,
+                tiler_port,
+                db_port,
+                api_image: "vantage-api:1.0.0".into(),
+                tiler_image: "vantage-tiler:1.0.0".into(),
+                inference_image: "vantage-inference:1.0.0".into(),
+                inference_device: "cpu".into(),
+            })
+            .expect("couldn't write per-install config — check disk space/permissions in the data directory");
+            let dev_token_secret =
+                read_rendered_value(&config_paths.env_file, "DEV_TOKEN_SECRET").unwrap_or_default();
+
+            let runtime_config =
+                FrontendRuntimeConfig::for_ports(api_port, tiler_port, APP_VERSION, dev_token_secret);
 
             // Runs before ANY of the page's own JS, on every navigation in
             // this window (splash.html first, then index.html once
@@ -125,7 +154,7 @@ fn main() {
 
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
-                boot::run(app_handle, data_dir, api_port, tiler_port, db_port);
+                boot::run(app_handle, data_dir, config_paths, api_port, tiler_port, db_port);
             });
 
             Ok(())

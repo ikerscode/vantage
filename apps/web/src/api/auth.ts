@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 
+import { getRuntimeConfig } from "../lib/runtimeConfig";
 import { useAuthStore } from "../store/authStore";
 import { getApiBaseUrl } from "./client";
 
@@ -12,8 +13,20 @@ interface TokenResponse {
 // PLACEHOLDER(v1): fetches a token for the single hardcoded dev user from
 // apps/api's dev-only auth stub. v2 replaces this with a real OIDC flow
 // against self-hosted Keycloak.
+//
+// BRIEF v1.8: the endpoint's own loopback check doesn't recognize every
+// container runtime (found for real: fails under Podman's rootless
+// networking — see apps/api/app/routers/auth.py's
+// _has_valid_dev_token_secret doc comment). Attaching this header is an
+// ADDITIONAL accepted path there, not a replacement for the network
+// check — harmless to send even when empty (the server only honors it
+// against a real, non-default generated secret).
 async function fetchDevToken(): Promise<string> {
-  const response = await fetch(`${getApiBaseUrl()}/api/auth/dev-token`, { method: "POST" });
+  const devTokenSecret = getRuntimeConfig().devTokenSecret;
+  const response = await fetch(`${getApiBaseUrl()}/api/auth/dev-token`, {
+    method: "POST",
+    headers: devTokenSecret ? { "X-Dev-Token-Secret": devTokenSecret } : undefined,
+  });
   if (!response.ok) throw new Error("failed to fetch dev token");
   const data = (await response.json()) as TokenResponse;
   return data.access_token;

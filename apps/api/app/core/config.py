@@ -15,6 +15,7 @@ _KNOWN_DEFAULT_SECRETS = {
     "change-me-dev-secret",
     "change-me-dev-tiler-token",
     "change-me-dev-inference-token",
+    "change-me-dev-token-secret",
 }
 _MIN_PRODUCTION_SECRET_LENGTH = 32
 
@@ -65,6 +66,14 @@ class Settings(BaseSettings):
     dev_user_sub: str = "dev-analyst"
     dev_user_name: str = "Dev Analyst"
     dev_user_roles: Annotated[list[str], NoDecode] = ["analyst"]
+    # BRIEF v1.8: portable alternative to _is_loopback's network-topology
+    # check (apps/api/app/routers/auth.py), which was only ever validated
+    # against Docker's bridge NAT and doesn't generalize to every runtime
+    # (confirmed: fails under Podman's rootless networking). An empty/
+    # default value means this path simply never matches -- the existing
+    # loopback check still gates dev-token exactly as before wherever this
+    # isn't configured (native dev, Docker-based deployments).
+    dev_token_secret: str = "change-me-dev-token-secret"
 
     # Tiler. SEC-01: the tiler requires this exact shared token on every
     # request (X-Tiler-Token header) — apps/api attaches it when building

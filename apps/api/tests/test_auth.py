@@ -93,3 +93,54 @@ def test_dev_token_still_rejects_non_loopback_in_production():
         assert exc_info.value.status_code == 403
     finally:
         auth_router.settings.vantage_env = original_env
+
+
+# BRIEF v1.8: found for real on a Podman install — _is_loopback's network
+# heuristic doesn't generalize to every container runtime (confirmed:
+# fails under Podman's rootless networking, which presents a host-
+# originated published-port connection as neither a literal loopback
+# address nor the container's own default gateway). A per-install shared
+# secret (same pattern as TILER_TOKEN/INFERENCE_TOKEN) is an ADDITIONAL
+# accepted path — every test below confirms it's additive, never a
+# replacement: the loopback tests above must keep passing unchanged, and
+# the secret path must never fail open.
+class TestDevTokenSecret:
+    def setup_method(self):
+        self._original_secret = auth_router.settings.dev_token_secret
+        auth_router.settings.dev_token_secret = "a-real-generated-secret-not-the-default-1234"
+
+    def teardown_method(self):
+        auth_router.settings.dev_token_secret = self._original_secret
+
+    def test_correct_secret_is_accepted_even_from_a_non_loopback_address(self):
+        # This is the actual Podman fix: a request from an address that
+        # fails every network-based check must still succeed if it
+        # presents the real, generated secret.
+        response = issue_dev_token(
+            _request("10.89.0.14"), x_dev_token_secret="a-real-generated-secret-not-the-default-1234"
+        )
+        assert response.access_token
+
+    def test_wrong_secret_is_rejected(self):
+        with pytest.raises(HTTPException) as exc_info:
+            issue_dev_token(_request("10.89.0.14"), x_dev_token_secret="some-guessed-value")
+        assert exc_info.value.status_code == 403
+
+    def test_missing_secret_header_falls_back_to_loopback_check_only(self):
+        # No header presented at all (e.g. an install predating this fix,
+        # or a caller that simply doesn't know it) — must behave exactly
+        # like before: loopback passes, non-loopback is rejected.
+        assert issue_dev_token(_request("127.0.0.1"), x_dev_token_secret=None).access_token
+        with pytest.raises(HTTPException):
+            issue_dev_token(_request("10.89.0.14"), x_dev_token_secret=None)
+
+    def test_known_default_placeholder_secret_is_never_accepted(self):
+        # Guards against exactly the failure mode caught during review: an
+        # install whose .env predates this fix has no real generated
+        # secret, so settings.dev_token_secret falls back to this same
+        # known, publicly-documented placeholder string. It must never be
+        # treated as a valid secret even if somehow presented as a header —
+        # otherwise anyone who's read this file could bypass the gate.
+        auth_router.settings.dev_token_secret = "change-me-dev-token-secret"
+        with pytest.raises(HTTPException):
+            issue_dev_token(_request("10.89.0.14"), x_dev_token_secret="change-me-dev-token-secret")

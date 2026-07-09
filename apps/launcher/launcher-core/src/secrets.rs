@@ -130,6 +130,11 @@ pub fn ensure_config(opts: &DeploymentOptions) -> Result<ConfigPaths, ConfigErro
     let tiler_token = random_token(48);
     let inference_token = random_token(48);
     let redis_password = random_token(32);
+    // BRIEF v1.8: portable alternative to the API's loopback-only network
+    // check for /api/auth/dev-token — see FrontendRuntimeConfig's doc
+    // comment (config.rs) for why the network heuristic alone isn't
+    // enough (found for real on a Podman install).
+    let dev_token_secret = random_token(48);
 
     let mut values: HashMap<&str, String> = HashMap::new();
     values.insert("DATA_DIR", opts.data_dir.display().to_string());
@@ -148,6 +153,7 @@ pub fn ensure_config(opts: &DeploymentOptions) -> Result<ConfigPaths, ConfigErro
     values.insert("TILER_TOKEN", tiler_token);
     values.insert("INFERENCE_TOKEN", inference_token);
     values.insert("REDIS_PASSWORD", redis_password);
+    values.insert("DEV_TOKEN_SECRET", dev_token_secret);
 
     let rendered_env = render(ENV_TEMPLATE, &values)?;
     fs::write(&env_path, rendered_env)?;
