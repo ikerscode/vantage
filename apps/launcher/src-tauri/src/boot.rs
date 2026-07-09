@@ -211,6 +211,31 @@ pub fn run(app: AppHandle, data_dir: PathBuf, api_port: u16, tiler_port: u16, db
     // vantage_launcher_core::config::FrontendRuntimeConfig::to_init_script.
     emit_progress(&app, "ready");
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.navigate("index.html".parse().expect("static literal is a valid URL"));
+        // BRIEF v1.8, found for real on a user's machine: "index.html" is a
+        // relative path, not an absolute URL, and `str::parse::<Url>()`
+        // requires an absolute URL with a scheme+host — it has no base to
+        // resolve a bare relative path against. The `.expect(...)` here
+        // always panicked, silently killing this background thread right
+        // at the final step of an otherwise fully successful boot (health
+        // checks passing, "ready" already logged) — the app just sat on
+        // the splash screen forever with no further progress possible,
+        // since the thread that would drive it had already died. Fixed by
+        // resolving against the window's own CURRENT url (whatever scheme
+        // Tauri's webview is actually using — tauri://localhost,
+        // http://tauri.localhost, etc. — varies by platform, so this must
+        // not be hardcoded) via Url::join, which is what relative-URL
+        // resolution actually requires.
+        match window.url().and_then(|current| {
+            current
+                .join("index.html")
+                .map_err(|e| tauri::Error::InvalidUrl(e))
+        }) {
+            Ok(target) => {
+                if let Err(e) = window.navigate(target) {
+                    emit_failed(&app, format!("couldn't navigate to the app UI: {e}"));
+                }
+            }
+            Err(e) => emit_failed(&app, format!("couldn't resolve the app UI's URL: {e}")),
+        }
     }
 }
