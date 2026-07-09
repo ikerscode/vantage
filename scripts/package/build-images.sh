@@ -28,11 +28,16 @@ echo "== building with $RUNTIME, tagging version $VERSION =="
 "$RUNTIME" build -t "vantage-pgstac-migrate:$VERSION" -f "$REPO_ROOT/infra/pgstac-migrate/Dockerfile" "$REPO_ROOT"
 
 # Third-party base images — pulled (not built) so save-images.sh can bundle
-# them too; docker-compose.prod.yml references these exact tags.
-"$RUNTIME" pull postgis/postgis:16-3.4-alpine
-"$RUNTIME" pull redis:7-alpine
-"$RUNTIME" pull minio/minio:latest
-"$RUNTIME" pull minio/mc:latest
+# them too; docker-compose.prod.yml references these exact tags. Fully-
+# qualified (docker.io/...), not short names (BRIEF v1.8): Podman doesn't
+# assume docker.io for unqualified names the way Docker does, and pulling
+# under a different name than the compose file expects would mean the
+# air-gap tarball's saved images don't match what compose looks for after
+# `docker/podman load` — see docker-compose.prod.yml's identical comment.
+"$RUNTIME" pull docker.io/postgis/postgis:16-3.4-alpine
+"$RUNTIME" pull docker.io/library/redis:7-alpine
+"$RUNTIME" pull docker.io/minio/minio:latest
+"$RUNTIME" pull docker.io/minio/mc:latest
 
 echo ""
 echo "== resolving local content digests for pinning =="

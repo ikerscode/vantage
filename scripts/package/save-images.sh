@@ -16,10 +16,14 @@ IMAGES=(
   "vantage-tiler:$VERSION"
   "vantage-inference:$VERSION"
   "vantage-pgstac-migrate:$VERSION"
-  "postgis/postgis:16-3.4-alpine"
-  "redis:7-alpine"
-  "minio/minio:latest"
-  "minio/mc:latest"
+  # Fully-qualified, matching build-images.sh's pull and
+  # docker-compose.prod.yml's image: defaults (BRIEF v1.8) — must be the
+  # exact same tag string build-images.sh pulled under, or `podman/docker
+  # load` restores them under a name compose no longer looks for.
+  "docker.io/postgis/postgis:16-3.4-alpine"
+  "docker.io/library/redis:7-alpine"
+  "docker.io/minio/minio:latest"
+  "docker.io/minio/mc:latest"
 )
 
 echo "== saving ${#IMAGES[@]} images to $OUT_PATH =="

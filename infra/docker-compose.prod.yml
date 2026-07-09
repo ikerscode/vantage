@@ -43,8 +43,16 @@ x-hardened: &hardened
 services:
   db:
     # -alpine (BRIEF v1.7 step 2) — see docker-compose.yml's identical
-    # comment for the rationale/verification gate.
-    image: ${VANTAGE_DB_IMAGE:-postgis/postgis:16-3.4-alpine}
+    # comment for the rationale/verification gate. Fully-qualified
+    # (docker.io/...), not a short name (BRIEF v1.8, found for real on a
+    # user's Podman install): Podman, unlike Docker, does not assume
+    # docker.io for unqualified image names unless the host's
+    # /etc/containers/registries.conf explicitly lists it as an
+    # unqualified-search registry — many distros ship Podman with none
+    # configured at all (a deliberate anti-squatting default upstream
+    # recommends), so a short name here fails outright with "short-name
+    # ... did not resolve to an alias" instead of silently defaulting.
+    image: ${VANTAGE_DB_IMAGE:-docker.io/postgis/postgis:16-3.4-alpine}
     env_file: ${VANTAGE_DATA_DIR}/config/.env
     volumes:
       - ${VANTAGE_DATA_DIR}/postgres:/var/lib/postgresql/data
@@ -72,7 +80,9 @@ services:
   # --env-file every launcher-issued compose invocation passes — see
   # compose.rs's base_args()) even though never published on a host port.
   redis:
-    image: ${VANTAGE_REDIS_IMAGE:-redis:7-alpine}
+    # Fully-qualified — see db's comment above (BRIEF v1.8). "library/" is
+    # required for Docker Hub's official images, not just "docker.io/redis".
+    image: ${VANTAGE_REDIS_IMAGE:-docker.io/library/redis:7-alpine}
     command: redis-server --requirepass ${REDIS_PASSWORD}
     volumes:
       - ${VANTAGE_DATA_DIR}/redis:/data
@@ -83,7 +93,8 @@ services:
       retries: 10
 
   minio:
-    image: ${VANTAGE_MINIO_IMAGE:-minio/minio:latest}
+    # Fully-qualified — see db's comment above (BRIEF v1.8).
+    image: ${VANTAGE_MINIO_IMAGE:-docker.io/minio/minio:latest}
     command: server /data --console-address ":9001"
     env_file: ${VANTAGE_DATA_DIR}/config/.env
     volumes:
@@ -95,7 +106,8 @@ services:
       retries: 10
 
   minio-init:
-    image: ${VANTAGE_MINIO_MC_IMAGE:-minio/mc:latest}
+    # Fully-qualified — see db's comment above (BRIEF v1.8).
+    image: ${VANTAGE_MINIO_MC_IMAGE:-docker.io/minio/mc:latest}
     env_file: ${VANTAGE_DATA_DIR}/config/.env
     entrypoint: >
       /bin/sh -c "
