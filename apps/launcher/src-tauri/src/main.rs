@@ -29,6 +29,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 use vantage_launcher_core::config::{default_data_dir, find_available_port, FrontendRuntimeConfig};
+use vantage_launcher_core::secrets::read_rendered_value;
 use vantage_launcher_core::support_bundle;
 
 use crate::state::{BootStatus, LauncherState, SERVICES};
@@ -40,6 +41,37 @@ use crate::state::{BootStatus, LauncherState, SERVICES};
 #[tauri::command]
 fn get_boot_status(state: tauri::State<LauncherState>) -> BootStatus {
     state.last_status.lock().expect("last_status mutex poisoned").clone()
+}
+
+/// BRIEF v1.8, found for real on a user's machine: on any launch after the
+/// first, secrets::ensure_config() reuses the existing `.env` untouched
+/// (correct — regenerating it would orphan the already-provisioned Postgres
+/// role passwords), but ports were always being freshly chosen via
+/// find_available_port() regardless. That's fine when nothing is already
+/// running, but if THIS app's own previous compose stack is still up
+/// (e.g. the app was killed instead of quit through the tray, or was
+/// simply launched twice), find_available_port(8000) correctly sees 8000
+/// is taken (by that already-running stack) and picks a different port —
+/// which the reused .env file, and therefore compose, knows nothing about.
+/// The result: this launch health-checks and configures the frontend
+/// against a port nothing is listening on, forever, while the actual
+/// (healthy) services keep serving on the port baked into the untouched
+/// .env. Fix: if a config already exists, read the ports actually baked
+/// into it back out and use those — only pick fresh ports when there's no
+/// existing config to be consistent with yet (first run).
+fn resolve_ports(data_dir: &std::path::Path) -> (u16, u16, u16) {
+    let env_path = data_dir.join("config").join(".env");
+    // Real rendered key names (infra/.env.prod.template) — NOT the
+    // template's internal {{API_PORT}}-style placeholder names, which are
+    // a different, un-prefixed set only used during rendering itself.
+    let persisted = ["VANTAGE_API_PORT", "VANTAGE_TILER_PORT", "VANTAGE_DB_PORT"]
+        .map(|key| read_rendered_value(&env_path, key).and_then(|v| v.parse::<u16>().ok()));
+
+    if let [Some(api), Some(tiler), Some(db)] = persisted {
+        return (api, tiler, db);
+    }
+
+    (find_available_port(8000), find_available_port(8001), find_available_port(5432))
 }
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -66,10 +98,11 @@ fn main() {
 
             // Chosen once, up front, so the injected runtime config (below)
             // and the health-gate poll (in boot::run) agree on the same
-            // ports for the lifetime of this run — see BRIEF v1.3 §3.
-            let api_port = find_available_port(8000);
-            let tiler_port = find_available_port(8001);
-            let db_port = find_available_port(5432);
+            // ports for the lifetime of this run — see BRIEF v1.3 §3. Reuses
+            // whatever ports are already baked into an existing config
+            // rather than always picking fresh ones (BRIEF v1.8) — see
+            // resolve_ports's doc comment for the real bug this fixes.
+            let (api_port, tiler_port, db_port) = resolve_ports(&data_dir);
 
             let runtime_config = FrontendRuntimeConfig::for_ports(api_port, tiler_port, APP_VERSION);
 
