@@ -143,10 +143,15 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let restart = MenuItem::with_id(app, "restart", "Restart", true, None::<&str>)?;
     let logs = MenuItem::with_id(app, "logs", "Export Support Bundle…", true, None::<&str>)?;
     let data_folder = MenuItem::with_id(app, "data_folder", "Open Data Folder", true, None::<&str>)?;
+    // Diagnostic escape hatch (BRIEF v1.8, found for real needing to debug a
+    // black-map report): right-click "Inspect Element" and the usual
+    // keyboard shortcut aren't guaranteed to be wired up on every platform/
+    // webview combination, so this guarantees a way in regardless.
+    let devtools = MenuItem::with_id(app, "devtools", "Open DevTools", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit VANTAGE", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
 
-    let menu = Menu::with_items(app, &[&restart, &logs, &data_folder, &separator, &quit])?;
+    let menu = Menu::with_items(app, &[&restart, &logs, &data_folder, &devtools, &separator, &quit])?;
 
     TrayIconBuilder::new()
         .menu(&menu)
@@ -178,6 +183,11 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             "data_folder" => {
                 let state = app.state::<LauncherState>();
                 let _ = app.opener().open_path(state.data_dir.display().to_string(), None::<&str>);
+            }
+            "devtools" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.open_devtools();
+                }
             }
             "quit" => {
                 // Clean shutdown (BRIEF v1.3 §2, §11): release ports via a
