@@ -55,6 +55,10 @@ export function MapCanvas() {
 
   const { data: activeAnalysis } = useAnalysis(activeAnalysisId ?? undefined);
   const { data: detections } = useDetections(activeAnalysisId ?? undefined);
+  // Subscribed (not just read at request time like transformRequest does)
+  // so the raster effect below re-runs when the token arrives — see its
+  // comment for the race this closes.
+  const tilerToken = useAuthStore((s) => s.tilerToken);
 
   // Initialize the map + deck.gl overlay once.
   useEffect(() => {
@@ -72,9 +76,19 @@ export function MapCanvas() {
       // the current token from the store at request time (not captured at
       // map-construction time) since it arrives asynchronously, after the
       // dev-auth bootstrap — see api/auth.ts, store/authStore.ts.
-      transformRequest: (url, resourceType) => {
+      //
+      // Scoped by URL prefix, NOT by resourceType (BRIEF v1.8, found for
+      // real on a user's install — the first time anyone ever got the
+      // packaged UI far enough to fetch a real tile): a raster source added
+      // by tilejson URL makes MapLibre fetch the tilejson itself first, and
+      // that request is resourceType "Source", not "Tile" — the previous
+      // narrowing to "Tile" meant the tilejson fetch NEVER carried the
+      // token, 401ing every layer before a single tile was ever requested.
+      // The URL-prefix check is what keeps the token from leaking to other
+      // hosts (Earth Search etc.); resourceType added nothing but this bug.
+      transformRequest: (url) => {
         const { tilerBaseUrl } = getRuntimeConfig();
-        if (resourceType === "Tile" && url.startsWith(tilerBaseUrl)) {
+        if (url.startsWith(tilerBaseUrl)) {
           const tilerToken = useAuthStore.getState().tilerToken;
           if (tilerToken) {
             return { url, headers: { "X-Tiler-Token": tilerToken } };
@@ -256,14 +270,25 @@ export function MapCanvas() {
       const ndviUrl = selectedScene?.self_href ? ndviTilejsonUrl(selectedScene.self_href) : null;
       const changeUrl = activeAnalysis?.tilejson_url ?? null;
 
+      // Every raster layer here is served by the tiler, which 401s any
+      // request without the token — and MapLibre never retries a source
+      // whose tilejson fetch failed. Deferring until the token exists (this
+      // effect re-runs when it arrives — tilerToken is a subscribed dep)
+      // beats adding a permanently-broken source. Found for real (BRIEF
+      // v1.8): auto-scene-selection made scene selection reliably FASTER
+      // than the auth bootstrap's tiler-token fetch, so the source was
+      // added tokenless and every layer stayed black despite everything
+      // else working.
+      const tilerReady = Boolean(tilerToken);
+
       syncRasterLayer(
         "true-color-layer",
         trueColorUrl,
-        activeRasterLayer === "true_color",
+        tilerReady && activeRasterLayer === "true_color",
         rasterOpacity.true_color,
       );
-      syncRasterLayer("ndvi-layer", ndviUrl, activeRasterLayer === "ndvi", rasterOpacity.ndvi);
-      syncRasterLayer("change-layer", changeUrl, activeRasterLayer === "change", rasterOpacity.change);
+      syncRasterLayer("ndvi-layer", ndviUrl, tilerReady && activeRasterLayer === "ndvi", rasterOpacity.ndvi);
+      syncRasterLayer("change-layer", changeUrl, tilerReady && activeRasterLayer === "change", rasterOpacity.change);
     };
 
     if (map.isStyleLoaded()) {
@@ -271,7 +296,7 @@ export function MapCanvas() {
     } else {
       map.once("load", applyLayers);
     }
-  }, [selectedScene, activeAnalysis, activeRasterLayer, rasterOpacity]);
+  }, [selectedScene, activeAnalysis, activeRasterLayer, rasterOpacity, tilerToken]);
 
   return <div ref={containerRef} className="map-canvas" />;
 }
