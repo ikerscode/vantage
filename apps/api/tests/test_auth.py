@@ -5,12 +5,14 @@ because Docker's NAT rewrites the source address to the bridge gateway IP.
 Native/non-container dev never exercised this path, so it shipped with a
 check that only worked when the API ran outside a container."""
 
-from types import SimpleNamespace
 from unittest.mock import mock_open, patch
 
 import pytest
 from fastapi import HTTPException
+from slowapi.errors import RateLimitExceeded
+from starlette.requests import Request
 
+from app.core.limiter import limiter
 from app.routers import auth as auth_router
 from app.routers.auth import _container_default_gateway, _is_loopback, issue_dev_token
 
@@ -24,8 +26,23 @@ _FAKE_ROUTE_TABLE = (
 
 
 def _request(host: str | None):
-    client = SimpleNamespace(host=host) if host is not None else None
-    return SimpleNamespace(client=client)
+    # A genuine starlette.requests.Request, not a duck-typed mock (BRIEF
+    # v2): slowapi's @limiter.limit() decorator on issue_dev_token
+    # requires isinstance(request, Request) and raises outright otherwise
+    # — a SimpleNamespace stand-in broke every test in this file the
+    # moment rate limiting was added. A minimal ASGI scope is enough for
+    # both _is_loopback (only reads request.client.host) and the real
+    # endpoint call to work correctly, including going through slowapi
+    # for real rather than bypassing it.
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/auth/dev-token",
+        "headers": [],
+        "client": (host, 12345) if host is not None else None,
+        "app": None,
+    }
+    return Request(scope)
 
 
 def test_real_loopback_addresses_pass():
@@ -144,3 +161,31 @@ class TestDevTokenSecret:
         auth_router.settings.dev_token_secret = "change-me-dev-token-secret"
         with pytest.raises(HTTPException):
             issue_dev_token(_request("10.89.0.14"), x_dev_token_secret="change-me-dev-token-secret")
+
+
+class TestRateLimiting:
+    """BRIEF v2: closes SECURITY_FIXES_REPORT.md's one explicitly-flagged
+    remaining gap ("Rate limiting (SlowAPI) — Not done"). A dedicated fake
+    IP per test class + limiter.reset() in teardown keeps this from
+    polluting other tests' rate-limit state (the limiter's request counts
+    are a module-level singleton, shared across the whole test session)."""
+
+    CLIENT_IP = "198.51.100.42"  # TEST-NET-2 (RFC 5737) — never a real host
+
+    def setup_method(self):
+        self._original_secret = auth_router.settings.dev_token_secret
+        auth_router.settings.dev_token_secret = "a-real-generated-secret-not-the-default-1234"
+
+    def teardown_method(self):
+        auth_router.settings.dev_token_secret = self._original_secret
+        limiter.reset()
+
+    def test_dev_token_rate_limit_trips_after_20_requests_per_minute(self):
+        for _ in range(20):
+            assert issue_dev_token(
+                _request(self.CLIENT_IP), x_dev_token_secret="a-real-generated-secret-not-the-default-1234"
+            ).access_token
+        with pytest.raises(RateLimitExceeded):
+            issue_dev_token(
+                _request(self.CLIENT_IP), x_dev_token_secret="a-real-generated-secret-not-the-default-1234"
+            )

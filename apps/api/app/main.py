@@ -1,7 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.routers import analyses, aois, auth, detections, events, health, monitors, stac
 
 # SEC-10: /docs, /redoc, /openapi.json expose the full API surface (routes,
@@ -14,6 +18,15 @@ _docs_kwargs = (
     else {}
 )
 app = FastAPI(title="VANTAGE API", version="0.1.0", **_docs_kwargs)
+
+# BRIEF v2 (SECURITY_FIXES_REPORT.md's one explicitly-flagged remaining
+# gap): see app/core/limiter.py for what this does and doesn't buy in a
+# single-workstation deployment. The exception handler is what turns a
+# tripped limit into a real 429 response instead of an unhandled
+# RateLimitExceeded propagating as a 500.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

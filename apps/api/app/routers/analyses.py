@@ -1,10 +1,11 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.analysis_result import AnalysisResult, AnalysisStatus
@@ -23,7 +24,13 @@ def _tilejson_url(analysis: AnalysisResult) -> str | None:
 
 
 @router.post("", response_model=AnalysisRead, status_code=status.HTTP_201_CREATED)
+# Stricter than the other write endpoints (SECURITY_FIXES_REPORT.md's
+# rate-limiting gap): this one kicks off a real Celery job, not just a row
+# insert — the actual resource this limit protects is worker/compute
+# capacity, not the API process itself.
+@limiter.limit("10/minute")
 def create_analysis(
+    request: Request,
     payload: AnalysisCreate,
     db: Session = Depends(get_db),
     _user: UserClaims = Depends(get_current_user),

@@ -5,6 +5,7 @@ import struct
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.core.security import create_dev_token, get_current_user
 from app.schemas.auth import TokenResponse, UserClaims
 
@@ -72,6 +73,12 @@ def _has_valid_dev_token_secret(x_dev_token_secret: str | None) -> bool:
 
 
 @router.post("/dev-token", response_model=TokenResponse)
+# SECURITY_FIXES_REPORT.md's own §1.5 flagged this exact endpoint as the
+# one that most wants rate limiting ("hands out a valid token to anyone
+# who can reach it, no password"). 20/minute is generous for legitimate
+# use (the frontend calls this once per app launch, not per request) while
+# capping how fast a compromised/runaway local process can mint tokens.
+@limiter.limit("20/minute")
 def issue_dev_token(request: Request, x_dev_token_secret: str | None = Header(default=None)) -> TokenResponse:
     """PLACEHOLDER(v1): issues a token for the single hardcoded dev user, no
     credential check. v2 replaces this with a real OIDC code-exchange against

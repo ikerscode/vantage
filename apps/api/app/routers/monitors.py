@@ -1,9 +1,10 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.limiter import limiter
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.monitor import Monitor
@@ -14,7 +15,9 @@ router = APIRouter(prefix="/monitors", tags=["monitors"])
 
 
 @router.post("", response_model=MonitorRead, status_code=status.HTTP_201_CREATED)
+@limiter.limit("20/minute")
 def create_monitor(
+    request: Request,
     payload: MonitorCreate,
     db: Session = Depends(get_db),
     _user: UserClaims = Depends(get_current_user),

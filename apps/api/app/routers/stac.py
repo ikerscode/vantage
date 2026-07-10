@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.core.limiter import limiter
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.imagery.factory import get_imagery_source
@@ -13,7 +14,12 @@ router = APIRouter(prefix="/stac", tags=["stac"])
 
 
 @router.post("/search", response_model=list[StacItemSummary])
+# Online mode (IMAGERY_SOURCE=earth_search) forwards this to a public,
+# shared third-party API — this cap protects that goodwill, not just this
+# process (SECURITY_FIXES_REPORT.md's rate-limiting gap).
+@limiter.limit("30/minute")
 def search_stac(
+    request: Request,
     payload: StacSearchRequest,
     db: Session = Depends(get_db),
     _user: UserClaims = Depends(get_current_user),
