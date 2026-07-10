@@ -26,6 +26,7 @@ export function ResultsFeed() {
   const selectedAoiId = useAoiStore((s) => s.selectedAoiId);
   const activeAnalysisId = useAnalysisStore((s) => s.activeAnalysisId);
   const setInspectorTarget = useAnalysisStore((s) => s.setInspectorTarget);
+  const setActiveAnalysisId = useAnalysisStore((s) => s.setActiveAnalysisId);
 
   const { data: activeAnalysis } = useAnalysis(activeAnalysisId ?? undefined);
   const { data: analyses } = useAnalyses(selectedAoiId ?? undefined);
@@ -93,7 +94,16 @@ export function ResultsFeed() {
       meta: `threshold ${analysis.threshold}`,
       conf: pct != null ? `${(pct * 100).toFixed(1)}%` : "—",
       time: (analysis.completed_at ?? analysis.created_at).slice(11, 16).replace(":", "") + "Z",
-      onClick: () => setInspectorTarget({ kind: "analysis", id: analysis.id }),
+      // BRIEF v2, found for real: this only ever set inspectorTarget, so
+      // MapCanvas's Change layer (keyed off activeAnalysisId, not
+      // inspectorTarget) never had anything to render for a PAST analysis --
+      // toggling "Change" after clicking an old result here just went dark,
+      // indistinguishable from the layer being broken. Only a just-run
+      // analysis (TemporalScrubber's handleRunAnalysis) ever set this before.
+      onClick: () => {
+        setInspectorTarget({ kind: "analysis", id: analysis.id });
+        setActiveAnalysisId(analysis.id);
+      },
     });
   }
   for (const detection of detections ?? []) {

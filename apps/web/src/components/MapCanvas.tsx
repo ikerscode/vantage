@@ -99,7 +99,18 @@ export function MapCanvas() {
     });
     mapRef.current = map;
 
-    const overlay = new MapboxOverlay({ layers: [] });
+    // interleaved: true is load-bearing, not cosmetic (BRIEF v2, found for
+    // real): @deck.gl/mapbox's default "overlaid" mode gives deck.gl its own
+    // canvas with pointer-events: none, and feeds MapLibre's click/drag
+    // events into it by calling Deck's internal _onEvent method directly --
+    // bypassing the shared mjolnir.js event bus entirely. EditableGeoJsonLayer
+    // (AOI drawing) registers its own listener ON that same bus to catch raw
+    // clicks, so in overlaid mode it never receives a single one -- drawing
+    // silently does nothing, no matter what the map's own dragPan/
+    // doubleClickZoom state is. Interleaved mode shares MapLibre's real
+    // canvas and real event dispatch instead, restoring genuine multi-
+    // listener mjolnir.js behavior.
+    const overlay = new MapboxOverlay({ interleaved: true, layers: [] });
     map.addControl(overlay as unknown as maplibregl.IControl);
     overlayRef.current = overlay;
 
