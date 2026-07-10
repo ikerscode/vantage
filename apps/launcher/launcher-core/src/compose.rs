@@ -4,10 +4,65 @@
 //! hand, so `apps/launcher`'s behavior stays debuggable against a plain
 //! terminal.
 
+use std::io::{Error, ErrorKind, Read};
 use std::path::{Path, PathBuf};
-use std::process::Output;
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::runtime_detect::{external_tool_command, ContainerRuntime};
+
+// BRIEF v2, found for real, live: `up -d` waits internally on OTHER
+// containers' healthchecks (compose's own `depends_on: condition:
+// service_healthy`, e.g. api/tiler/worker all waiting on db) -- if a
+// dependency can never actually become healthy (confirmed live: db never
+// even started because something ENTIRELY UNRELATED already held its
+// persisted port), that wait has no natural end. `Command::output()` has
+// no timeout of its own, so this hung the whole boot sequence forever,
+// with the splash screen frozen and zero feedback -- not a crash, not an
+// error, just silence. A bounded timeout turns that into a real, visible
+// failure. The child is actually killed on expiry, not just abandoned --
+// an abandoned podman-compose process left running in the background is
+// exactly the kind of leftover that caused THIS incident's port conflict
+// in the first place.
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(180);
+
+fn run_with_timeout(cmd: Command) -> std::io::Result<Output> {
+    run_with_deadline(cmd, COMMAND_TIMEOUT)
+}
+
+fn run_with_deadline(mut cmd: Command, timeout: Duration) -> std::io::Result<Output> {
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    let mut child = cmd.spawn()?;
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        if let Some(status) = child.try_wait()? {
+            let mut stdout = Vec::new();
+            let mut stderr = Vec::new();
+            if let Some(mut o) = child.stdout.take() {
+                o.read_to_end(&mut stdout)?;
+            }
+            if let Some(mut e) = child.stderr.take() {
+                e.read_to_end(&mut stderr)?;
+            }
+            return Ok(Output { status, stdout, stderr });
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(Error::new(
+                ErrorKind::TimedOut,
+                format!(
+                    "compose command did not finish within {timeout:?} -- likely waiting on a \
+                     dependency (e.g. the database) that never became healthy, possibly because \
+                     something else already holds one of this install's configured ports"
+                ),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
 
 pub struct ComposeRunner {
     runtime: ContainerRuntime,
@@ -55,7 +110,9 @@ impl ComposeRunner {
     fn run(&self, tail: &[&str]) -> std::io::Result<Output> {
         let args = self.base_args();
         let (program, rest) = args.split_first().expect("base_args always has at least the runtime binary");
-        external_tool_command(program).args(rest).args(tail).output()
+        let mut cmd = external_tool_command(program);
+        cmd.args(rest).args(tail);
+        run_with_timeout(cmd)
     }
 
     /// `compose up -d` — brings up every service in the background. Health
@@ -107,6 +164,36 @@ pub fn compose_file_path(repo_or_resource_root: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_with_deadline_kills_a_hanging_child_instead_of_waiting_forever() {
+        // Real reproduction of tonight's incident: `sleep 30` never exits on
+        // its own within this test's lifetime, standing in for `up -d`
+        // stuck waiting on a healthcheck that can never succeed. Proves two
+        // things a mock can't: this returns promptly (not after the full
+        // hang), and the process is genuinely killed, not just abandoned to
+        // possibly linger in the background afterward (an abandoned
+        // podman-compose process is exactly what caused the port conflict
+        // this incident started from).
+        let mut cmd = Command::new("sleep");
+        cmd.arg("30");
+        let start = Instant::now();
+        let result = run_with_deadline(cmd, Duration::from_millis(300));
+        let elapsed = start.elapsed();
+
+        assert!(elapsed < Duration::from_secs(5), "took {elapsed:?} to return -- did not actually time out promptly");
+        let err = result.expect_err("a hung child must surface as a real error, not hang the caller forever");
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+    }
+
+    #[test]
+    fn run_with_deadline_returns_real_output_for_a_command_that_finishes_in_time() {
+        let mut cmd = Command::new("echo");
+        cmd.arg("hello");
+        let output = run_with_deadline(cmd, Duration::from_secs(5)).expect("echo should succeed well within the timeout");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "hello");
+    }
 
     #[test]
     fn base_args_put_env_file_before_compose_file_and_use_the_right_runtime_prefix() {
