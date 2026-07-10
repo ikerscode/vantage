@@ -10,6 +10,8 @@ See `CLAUDE.md` for the always-on architectural context (invariants, conventions
 
 **Contributors / anyone modifying the code**: keep reading — this section is the source-build path.
 
+**Already have it running?** See **[docs/MANUAL.md](docs/MANUAL.md)** for how to actually use it — drawing AOIs, running change detection, setting up monitors, and reading the status strip.
+
 ## Stack
 
 | Layer | Choice |
