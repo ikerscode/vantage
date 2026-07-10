@@ -30,9 +30,9 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
-use crate::runtime_detect::ContainerRuntime;
+use crate::runtime_detect::{external_tool_command, ContainerRuntime};
 
 /// (local tag docker-compose.prod.yml's defaults expect, GHCR image
 /// pulled and re-tagged to match it) — re-tagging after pull means nothing
@@ -130,15 +130,15 @@ fn write_marker(marker: &Path) -> io::Result<()> {
 }
 
 fn run_load(runtime: &ContainerRuntime, tarball_path: &Path) -> io::Result<Output> {
-    Command::new(runtime_binary(runtime)).arg("load").arg("-i").arg(tarball_path).output()
+    external_tool_command(runtime_binary(runtime)).arg("load").arg("-i").arg(tarball_path).output()
 }
 
 fn run_pull(runtime: &ContainerRuntime, image: &str) -> io::Result<Output> {
-    Command::new(runtime_binary(runtime)).arg("pull").arg(image).output()
+    external_tool_command(runtime_binary(runtime)).arg("pull").arg(image).output()
 }
 
 fn run_tag(runtime: &ContainerRuntime, src: &str, dst: &str) -> io::Result<Output> {
-    Command::new(runtime_binary(runtime)).arg("tag").arg(src).arg(dst).output()
+    external_tool_command(runtime_binary(runtime)).arg("tag").arg(src).arg(dst).output()
 }
 
 #[cfg(test)]

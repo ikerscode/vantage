@@ -5,9 +5,9 @@
 //! terminal.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
-use crate::runtime_detect::ContainerRuntime;
+use crate::runtime_detect::{external_tool_command, ContainerRuntime};
 
 pub struct ComposeRunner {
     runtime: ContainerRuntime,
@@ -36,7 +36,7 @@ impl ComposeRunner {
     fn run(&self, tail: &[&str]) -> std::io::Result<Output> {
         let args = self.base_args();
         let (program, rest) = args.split_first().expect("base_args always has at least the runtime binary");
-        Command::new(program).args(rest).args(tail).output()
+        external_tool_command(program).args(rest).args(tail).output()
     }
 
     /// `compose up -d` — brings up every service in the background. Health
