@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetch } from "./client";
 import type { Monitor } from "./types";
+import { useAuthStore } from "../store/authStore";
 
 interface CreateMonitorInput {
   aoi_id: string;
@@ -11,10 +12,14 @@ interface CreateMonitorInput {
   baseline_date?: string;
 }
 
+// BRIEF v2, found for real: see aois.ts's useAois for why this waits on
+// token readiness instead of firing unauthenticated and relying on retry.
 export function useMonitors() {
+  const token = useAuthStore((s) => s.token);
   return useQuery({
     queryKey: ["monitors"],
     queryFn: () => apiFetch<Monitor[]>("/api/monitors"),
+    enabled: !!token,
   });
 }
 

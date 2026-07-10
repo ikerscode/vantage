@@ -24,8 +24,27 @@ impl ComposeRunner {
         Self { runtime, compose_file, env_file }
     }
 
+    // BRIEF v2, found for real on a live machine: with no explicit project
+    // name, Compose derives one from the compose file's own containing
+    // directory -- and docker-compose.prod.yml is bundled at
+    // <resources>/infra/docker-compose.prod.yml, so its parent directory is
+    // literally named "infra", exactly like this repo's OWN dev compose
+    // file (infra/docker-compose.yml). Anyone who has ever brought up the
+    // dev stack from a checkout of this repo on the same machine ends up
+    // with a SECOND, completely unrelated "infra" project using different
+    // secrets/env -- and Compose reuses/starts pre-existing containers
+    // under a matching project+service name rather than erroring, so the
+    // packaged app can silently end up serving through the WRONG stack's
+    // containers, with the wrong DEV_TOKEN_SECRET baked in, 401ing every
+    // authenticated request with no indication why. An explicit project
+    // name removes any dependence on directory layout, in either compose
+    // file, forever.
+    const PROJECT_NAME: &str = "vantage";
+
     fn base_args(&self) -> Vec<String> {
         let mut args: Vec<String> = self.runtime.compose_command_prefix().iter().map(|s| s.to_string()).collect();
+        args.push("-p".into());
+        args.push(Self::PROJECT_NAME.into());
         args.push("--env-file".into());
         args.push(self.env_file.display().to_string());
         args.push("-f".into());
@@ -102,6 +121,8 @@ mod tests {
             vec![
                 "docker",
                 "compose",
+                "-p",
+                "vantage",
                 "--env-file",
                 "/home/user/.local/share/VANTAGE/config/.env",
                 "-f",
@@ -123,5 +144,28 @@ mod tests {
         // "podman compose" if this collapsed to one token.
         assert_eq!(runner.base_args()[0], "podman");
         assert_eq!(runner.base_args()[1], "compose");
+    }
+
+    #[test]
+    fn project_name_is_explicit_and_independent_of_the_compose_files_own_directory() {
+        // Found for real on a live machine: docker-compose.prod.yml is
+        // bundled at <resources>/infra/docker-compose.prod.yml -- same
+        // parent directory name ("infra") as this repo's OWN dev compose
+        // file. With no explicit project name, Compose derives one from
+        // that directory, so the packaged app and a manually-run dev stack
+        // resolve to the SAME project ("infra") and can collide: Compose
+        // reuses/starts whichever pre-existing "infra_*" containers it
+        // finds, which may be the dev stack's own (different secrets, no
+        // relation to this install), 401ing every authenticated request
+        // with no obvious cause. This must never again depend on directory
+        // layout, for either runtime.
+        let runner = ComposeRunner::new(
+            ContainerRuntime::PodmanStandaloneCompose,
+            PathBuf::from("/anything/infra/docker-compose.prod.yml"),
+            PathBuf::from("/anything/.env"),
+        );
+        let args = runner.base_args();
+        let p_index = args.iter().position(|a| a == "-p").expect("must always pass an explicit -p project name");
+        assert_eq!(args[p_index + 1], "vantage");
     }
 }
