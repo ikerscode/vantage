@@ -140,6 +140,27 @@ export function MapCanvas() {
     clearFlyToRequest();
   }, [flyToRequest, clearFlyToRequest]);
 
+  // BRIEF v2, found for real: MapLibre's own dragPan/doubleClickZoom
+  // handlers consume the mousedown/dblclick before deck.gl's
+  // EditableGeoJsonLayer ever sees it (a well-documented deck.gl+Mapbox/
+  // MapLibre integration limitation, not a bug in our layer config —
+  // MapboxOverlay only forwards a subset of pointer events to deck.gl,
+  // and does so AFTER the base map's own handlers have already acted on
+  // them). Without this, clicking to add a vertex just pans the map
+  // instead. Disabling both while drawing (and double-click, which
+  // DrawPolygonMode uses to finish a ring) is the standard fix.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (isDrawing) {
+      map.dragPan.disable();
+      map.doubleClickZoom.disable();
+    } else {
+      map.dragPan.enable();
+      map.doubleClickZoom.enable();
+    }
+  }, [isDrawing]);
+
   // Vector layers: saved AOIs, the in-progress AOI draw layer, detection boxes.
   useEffect(() => {
     const overlay = overlayRef.current;

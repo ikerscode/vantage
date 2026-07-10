@@ -25,7 +25,8 @@ export function useAlertToastWatcher(): void {
       const aoiName = aois?.find((a) => a.id === event.aoi_id)?.name ?? event.aoi_id.slice(0, 8);
       pushToast({
         id: event.id,
-        monitorName: aoiName,
+        kind: "alert",
+        title: `Monitor tripped — ${aoiName}`,
         summary: event.summary,
         time: event.created_at.slice(11, 16).replace(":", "") + "Z",
       });

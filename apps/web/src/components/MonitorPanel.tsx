@@ -40,12 +40,20 @@ export function MonitorPanel() {
 
   const handleCreate = () => {
     if (!selectedAoiId) return;
-    createMonitor.mutate({
-      aoi_id: selectedAoiId,
-      schedule,
-      threshold: threshold ? Number(threshold) : undefined,
-      baseline_date: baselineDate || undefined,
-    });
+    createMonitor.mutate(
+      {
+        aoi_id: selectedAoiId,
+        schedule,
+        threshold: threshold ? Number(threshold) : undefined,
+        baseline_date: baselineDate || undefined,
+      },
+      {
+        onSuccess: () => {
+          setThreshold("");
+          setBaselineDate("");
+        },
+      },
+    );
   };
 
   return (

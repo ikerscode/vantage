@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 
+import type { ToastKind } from "../store/toastStore";
 import { useToastStore } from "../store/toastStore";
 
 const AUTO_DISMISS_MS = 12_000;
@@ -14,7 +15,8 @@ export function ToastStack() {
         <ToastItem
           key={toast.id}
           id={toast.id}
-          title={toast.monitorName}
+          kind={toast.kind}
+          title={toast.title}
           summary={toast.summary}
           time={toast.time}
           offset={i}
@@ -27,6 +29,7 @@ export function ToastStack() {
 
 function ToastItem({
   id,
+  kind,
   title,
   summary,
   time,
@@ -34,6 +37,7 @@ function ToastItem({
   onDismiss,
 }: {
   id: string;
+  kind: ToastKind;
   title: string;
   summary: string;
   time: string;
@@ -46,10 +50,10 @@ function ToastItem({
   }, [id, onDismiss]);
 
   return (
-    <div className="toast" style={{ top: `${96 + offset * 92}px` }}>
+    <div className={kind === "error" ? "toast toast-error" : "toast"} style={{ top: `${96 + offset * 92}px` }}>
       <span className="toast-dot" />
       <div className="toast-body">
-        <div className="toast-title">Monitor tripped — {title}</div>
+        <div className="toast-title">{title}</div>
         <div className="toast-meta">{summary}</div>
         <div className="toast-time">{time}</div>
       </div>

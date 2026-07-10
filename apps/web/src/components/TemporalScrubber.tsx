@@ -125,16 +125,34 @@ export function TemporalScrubber() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAoiId]);
 
+  // Populates singleDate (Explore) AND dateA/dateB (Analyze) together, from
+  // whichever scenes exist, regardless of which scrubberMode is currently
+  // active — switching modes should never land on an empty, unusable
+  // state. Found for real: "RUN ANALYSIS" looked completely broken
+  // (clicking it did nothing) because nothing had ever set dateA/dateB —
+  // handleRunAnalysis silently no-ops without both, and picking two
+  // distinct scene ticks by hand was the only way to populate them.
   const autoPickedForAoi = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedAoiId || scenes.length === 0 || autoPickedForAoi.current === selectedAoiId) return;
-    if (scrubberMode === "single" && singleDate) return; // user (or a prior auto-pick) already chose one
     autoPickedForAoi.current = selectedAoiId;
-    const mostRecent = [...scenes].sort((a, b) => b.datetime.localeCompare(a.datetime))[0];
-    pickScene(mostRecent);
-    // pickScene/scrubberMode/singleDate intentionally excluded — this is a
-    // one-shot default per AOI, not a live sync; re-running it on every
-    // dependency change would fight a user's own scene choice.
+
+    const sorted = [...scenes].sort((a, b) => a.datetime.localeCompare(b.datetime));
+    const earliest = sorted[0];
+    const latest = sorted[sorted.length - 1];
+
+    setSelectedScene(latest);
+    if (!singleDate) setSingleDate(latest.datetime.slice(0, 10));
+    if (!dateA && !dateB) {
+      setDateA(earliest.datetime.slice(0, 10));
+      // A single-scene AOI has nothing to compare against yet — dateB
+      // stays null (RUN ANALYSIS correctly stays disabled) rather than
+      // comparing a date against itself.
+      if (earliest.id !== latest.id) setDateB(latest.datetime.slice(0, 10));
+    }
+    // Deliberately excludes singleDate/dateA/dateB/setters/pickScene — this
+    // is a one-shot default per AOI, not a live sync; re-running it on
+    // every dependency change would fight a user's own scene choice.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAoiId, scenes]);
 

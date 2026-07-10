@@ -1453,3 +1453,19 @@ button {
   background: none;
   border: none;
 }
+
+/* App/system-level notices (request failures etc.) vs. domain monitor-trip
+   alerts (.toast's default red) — reuses the existing accent color rather
+   than introducing a third semantic color (CLAUDE.md §5: one accent color
+   for chrome, no ad-hoc traffic-light palette). */
+.toast-error {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.4),
+    0 0 16px var(--accent-dim);
+}
+
+.toast-error .toast-dot {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}

@@ -153,7 +153,8 @@ export function CommandBar() {
               {match.kind === "coord" ? (
                 <>
                   <span className="command-bar-value-mono">
-                    {match.lat.toFixed(4)}°N {match.lon.toFixed(4)}°E
+                    {Math.abs(match.lat).toFixed(4)}°{match.lat >= 0 ? "N" : "S"}{" "}
+                    {Math.abs(match.lon).toFixed(4)}°{match.lon >= 0 ? "E" : "W"}
                   </span>
                   {i === 0 && <span className="command-bar-meta">⏎</span>}
                 </>
