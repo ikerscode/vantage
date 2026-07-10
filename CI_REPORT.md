@@ -34,10 +34,17 @@ and `PACKAGE_REPORT.md`'s "Environment reality").
   gracefully if not.
 - **`release`** (`.github/workflows/release.yml`, triggered by `app-v*`
   tags): same build, but publishes the installers to an actual GitHub
-  Release. **Not yet exercised** — no `app-v*` tag has been pushed. Its
-  build steps are identical to `build-desktop`'s (now proven working), so
-  it inherits that confidence, but the release-publish path itself is
-  unverified until a real tag is pushed.
+  Release. **Update (post-v1.6/v1.7, re-confirmed BRIEF v2)**: this is no
+  longer unexercised — 15 tags have shipped real releases (`app-v0.1.0`
+  through `app-v0.1.14`), and `airgap-acceptance-test`/
+  `thin-installer-acceptance-test` jobs (added since this section was
+  first written) install the real published `.deb` on a clean runner and
+  confirm the demo AOI renders real Sentinel-2 imagery for both the
+  offline-bundle and GHCR-pull paths — see `PACKAGING_V2_REPORT.md` and
+  `OFFLINE_BUNDLE_REPORT.md` for the real run evidence. BRIEF v2 also fixed
+  a real bug in this pipeline: every one of those 15 releases shared the
+  identical bundle filename (`VANTAGE_0.1.0_amd64.deb` for all of them) —
+  see `BRIEF_V2_REPORT.md` §4.
 
 ## Real run history
 
@@ -117,11 +124,9 @@ from `tauri.conf.json`'s configured `bundle.targets`
     names above, as applicable to the platform(s) you're signing for). No
     workflow change is needed — the export-if-present step already wires
     them through correctly the moment they exist.
-- **`release.yml` is unexercised**: no `app-v*` tag has been pushed yet.
-  Its build steps are identical to `build-desktop`'s (now proven working),
-  but the actual GitHub Release publish step has not been run for real.
-  - **Operator runbook**: `git tag app-v0.1.0 && git push origin app-v0.1.0`
-    to cut the first real release once ready.
+- ~~**`release.yml` is unexercised**~~ — **resolved**: 15 real releases
+  shipped since this was written (`app-v0.1.0`..`app-v0.1.14`); see the
+  updated note above and `BRIEF_V2_REPORT.md`.
 
 ## Security disclosure — historical plaintext secret leak
 
