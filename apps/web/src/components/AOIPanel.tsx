@@ -46,10 +46,20 @@ export function AOIPanel() {
     createAoi.mutate(
       { name: draftName.trim(), geometry: draftGeometry },
       {
-        onSuccess: () => {
+        // Found while confirming the drawing fix live: a freshly-drawn AOI
+        // never got selected, so the map stayed on its dark default view
+        // until you separately clicked it in the list -- looked like
+        // drawing "didn't do anything visible" right after the save that
+        // should have been the payoff. Select + fly to it immediately,
+        // same as clicking an existing row does.
+        onSuccess: (created) => {
           setDraftGeometry(null);
           setDraftName("");
           setIsDrawing(false);
+          setSelectedAoiId(created.id);
+          setInspectorTarget({ kind: "aoi", id: created.id });
+          const { longitude, latitude } = polygonCentroid(created.geometry);
+          requestFlyTo({ longitude, latitude, zoom: 12 });
         },
       },
     );
