@@ -1,9 +1,11 @@
 import { useMemo } from "react";
 
 import { useAnalyses, useAnalysis } from "../api/analyses";
+import { useAois } from "../api/aois";
 import { useDetections } from "../api/detections";
 import { useEvents } from "../api/events";
 import type { EventRow } from "../api/types";
+import { polygonCentroid } from "../lib/geo";
 import { useAnalysisStore } from "../store/analysisStore";
 import { useAoiStore } from "../store/aoiStore";
 import { useEventStreamStore } from "../store/eventStreamStore";
@@ -23,11 +25,14 @@ interface FeedRow {
 
 export function ResultsFeed() {
   const mode = useMapStore((s) => s.mode);
+  const requestFlyTo = useMapStore((s) => s.requestFlyTo);
   const selectedAoiId = useAoiStore((s) => s.selectedAoiId);
+  const setSelectedAoiId = useAoiStore((s) => s.setSelectedAoiId);
   const activeAnalysisId = useAnalysisStore((s) => s.activeAnalysisId);
   const setInspectorTarget = useAnalysisStore((s) => s.setInspectorTarget);
   const setActiveAnalysisId = useAnalysisStore((s) => s.setActiveAnalysisId);
 
+  const { data: aois } = useAois();
   const { data: activeAnalysis } = useAnalysis(activeAnalysisId ?? undefined);
   const { data: analyses } = useAnalyses(selectedAoiId ?? undefined);
   const { data: detections } = useDetections(activeAnalysisId ?? undefined);
@@ -94,15 +99,27 @@ export function ResultsFeed() {
       meta: `threshold ${analysis.threshold}`,
       conf: pct != null ? `${(pct * 100).toFixed(1)}%` : "—",
       time: (analysis.completed_at ?? analysis.created_at).slice(11, 16).replace(":", "") + "Z",
-      // BRIEF v2, found for real: this only ever set inspectorTarget, so
-      // MapCanvas's Change layer (keyed off activeAnalysisId, not
-      // inspectorTarget) never had anything to render for a PAST analysis --
-      // toggling "Change" after clicking an old result here just went dark,
-      // indistinguishable from the layer being broken. Only a just-run
-      // analysis (TemporalScrubber's handleRunAnalysis) ever set this before.
+      // BRIEF v2, found for real (two rounds): (1) this only ever set
+      // inspectorTarget, so MapCanvas's Change layer (keyed off
+      // activeAnalysisId, not inspectorTarget) never had anything to
+      // render for a PAST analysis -- toggling "Change" after clicking an
+      // old result went dark. (2) even after fixing that, clicking a
+      // result still looked like it "did nothing": nothing here ever
+      // selected the analysis's OWN aoi_id or moved the map, so unless you
+      // already happened to have that exact AOI selected, the only visible
+      // effect was the easy-to-miss Inspector panel updating -- the map,
+      // AOI panel, and timeline all stayed exactly as they were. Now
+      // selects and flies to the analysis's AOI too, same as clicking an
+      // AOI row directly.
       onClick: () => {
         setInspectorTarget({ kind: "analysis", id: analysis.id });
         setActiveAnalysisId(analysis.id);
+        const aoi = aois?.find((a) => a.id === analysis.aoi_id);
+        if (aoi) {
+          setSelectedAoiId(aoi.id);
+          const { longitude, latitude } = polygonCentroid(aoi.geometry);
+          requestFlyTo({ longitude, latitude, zoom: 12 });
+        }
       },
     });
   }

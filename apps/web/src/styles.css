@@ -147,6 +147,37 @@ button {
   pointer-events: none;
 }
 
+/* BRIEF v2, found for real: the map has no basemap of its own by design
+   (no hosted tiles — see CLAUDE.md), so "nothing selected yet" and
+   "imagery failed to load" both render as identical solid black, with no
+   way to tell them apart. This is the single most-repeated point of live
+   confusion this project has ever produced. */
+.map-empty-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  text-align: center;
+}
+
+.map-empty-hint-inner {
+  max-width: 320px;
+}
+
+.map-empty-hint-title {
+  font-size: 13px;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.map-empty-hint-body {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
 .hud-overlay > * {
   pointer-events: auto;
 }

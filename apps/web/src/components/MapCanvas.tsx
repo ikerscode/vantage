@@ -330,5 +330,26 @@ export function MapCanvas() {
     }
   }, [selectedScene, activeAnalysis, activeRasterLayer, rasterOpacity, tilerToken]);
 
-  return <div ref={containerRef} className="map-canvas" />;
+  return (
+    <>
+      <div ref={containerRef} className="map-canvas" />
+      {/* BRIEF v2, found for real, repeatedly, across this entire project's
+          live testing history: there's no basemap here by design (see
+          CLAUDE.md's air-gap invariant), so a solid black map is the
+          correct rendering of "nothing selected yet" -- but it's also
+          exactly what a genuinely broken/failed-to-load state looks like.
+          Nothing ever distinguished the two before. */}
+      {!selectedScene && (
+        <div className="map-empty-hint">
+          <div className="map-empty-hint-inner">
+            <div className="map-empty-hint-title">No imagery loaded</div>
+            <div className="map-empty-hint-body">
+              This map has no basemap of its own — select an AOI on the left,
+              or draw a new one, to load real imagery here.
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
