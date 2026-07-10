@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useAnalyses, useCreateAnalysis } from "../api/analyses";
 import { useStacSearch } from "../api/stac";
@@ -35,7 +35,15 @@ export function TemporalScrubber() {
   const selectedAoiId = useAoiStore((s) => s.selectedAoiId);
   const stacSearch = useStacSearch();
 
-  const [dateFrom, setDateFrom] = useState(() => monthsAgoIso(3));
+  // 24 months, not 3 (BRIEF v1.8, found for real on a fresh install): the
+  // bundled demo scenes are ~several months to a year+ old by the time
+  // anyone actually installs this app, and with no auto-search/auto-pick
+  // (below) either, a 3-month default window silently found nothing,
+  // ever, until a user happened to know to widen it themselves — which
+  // looked identical to a rendering bug (the map has no basemap, so "no
+  // scene selected" and "imagery failed to load" both show as solid
+  // black/flat color).
+  const [dateFrom, setDateFrom] = useState(() => monthsAgoIso(24));
   const [dateTo, setDateTo] = useState(() => todayIso());
 
   const scrubberMode = useAnalysisStore((s) => s.scrubberMode);
@@ -94,6 +102,41 @@ export function TemporalScrubber() {
       setDateB(dateStr);
     }
   };
+
+  // BRIEF v1.8, found for real on a fresh install: selecting an AOI (even
+  // the auto-selected first one — see AOIPanel.tsx) never actually loaded
+  // any imagery on its own. SEARCH and picking a scene were both fully
+  // manual steps, so a real, working AOI with a real, completed analysis
+  // still showed nothing on the map until a user happened to click both —
+  // indistinguishable from a rendering bug (no basemap means "nothing
+  // selected yet" and "imagery failed" look identical: solid black).
+  // Auto-searches once per AOI selection, then auto-picks the most recent
+  // scene once results arrive, exactly what a manual SEARCH + click on
+  // the rightmost tick would have done — never overrides a user's own
+  // subsequent choice of scene.
+  const searchedForAoi = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedAoiId || searchedForAoi.current === selectedAoiId) return;
+    searchedForAoi.current = selectedAoiId;
+    stacSearch.mutate({ aoi_id: selectedAoiId, date_from: dateFrom, date_to: dateTo });
+    // dateFrom/dateTo intentionally excluded — this should fire once per
+    // AOI selection, not on every date-range edit (that's what the
+    // SEARCH button is for).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAoiId]);
+
+  const autoPickedForAoi = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedAoiId || scenes.length === 0 || autoPickedForAoi.current === selectedAoiId) return;
+    if (scrubberMode === "single" && singleDate) return; // user (or a prior auto-pick) already chose one
+    autoPickedForAoi.current = selectedAoiId;
+    const mostRecent = [...scenes].sort((a, b) => b.datetime.localeCompare(a.datetime))[0];
+    pickScene(mostRecent);
+    // pickScene/scrubberMode/singleDate intentionally excluded — this is a
+    // one-shot default per AOI, not a live sync; re-running it on every
+    // dependency change would fight a user's own scene choice.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAoiId, scenes]);
 
   if (mode === "monitor") {
     const analyses = recentAnalyses ?? [];
