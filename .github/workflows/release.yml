@@ -26,6 +26,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # BRIEF v2 fix, found for real during live device testing: every
+      # release before this one left tauri.conf.json's "version" field
+      # (the one the bundler actually names output files from) hardcoded at
+      # "0.1.0" — 15 tags (app-v0.1.0..app-v0.1.14) all produced a
+      # byte-different VANTAGE_0.1.0_amd64.deb under the SAME filename, so
+      # a stale cached download and a fresh one were indistinguishable by
+      # name alone. Stamp the real tag version into the bundle before it's
+      # ever built, on every platform in this matrix.
+      - name: Stamp this tag's version into the bundle (scripts/package/set-version.sh)
+        shell: bash
+        run: ./scripts/package/set-version.sh "${GITHUB_REF_NAME#app-v}"
+
       # Same reconciled package list as ci.yml's build-desktop job — see
       # that job's comment for where each package came from.
       - name: Install Linux system dependencies for Tauri
