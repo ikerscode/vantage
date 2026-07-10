@@ -1,6 +1,7 @@
+import logging
 from datetime import date, datetime, timedelta, timezone
 
-from croniter import croniter
+from croniter import CroniterBadCronError, croniter
 
 from app.core.celery_app import celery_app
 from app.core.config import settings
@@ -13,6 +14,8 @@ from app.models.monitor import Monitor
 from app.schemas.geo import wkb_to_geojson
 from app.services.change_detection_pipeline import ChangeDetectionError, execute_change_detection
 from app.services.events_pubsub import publish_event
+
+logger = logging.getLogger(__name__)
 
 # How far back to look for a first-ever comparison scene when a monitor has
 # neither a baseline_date nor a prior last_scene_date yet.
@@ -64,7 +67,22 @@ def sweep_monitors() -> None:
         monitors = session.query(Monitor).filter(Monitor.active.is_(True)).all()
 
         for monitor in monitors:
-            if not _is_due(monitor, now):
+            try:
+                due = _is_due(monitor, now)
+            except CroniterBadCronError:
+                # BRIEF v2, found for real: this used to raise unhandled
+                # here, crashing the sweep for every OTHER monitor too, not
+                # just this one -- the API now validates cron expressions
+                # at creation time (app/schemas/monitor.py), so this is a
+                # defensive backstop for any row that predates that
+                # validation, not the primary defense.
+                logger.error(
+                    "monitor %s has an invalid cron schedule %r -- skipping, not failing the whole sweep",
+                    monitor.id,
+                    monitor.schedule,
+                )
+                continue
+            if not due:
                 continue
 
             aoi = session.get(AOI, monitor.aoi_id)

@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, model_validator
 
 if TYPE_CHECKING:
     from app.models.analysis_result import AnalysisResult
@@ -13,6 +13,32 @@ class AnalysisCreate(BaseModel):
     date_a: date
     date_b: date
     threshold: float | None = None  # falls back to settings.change_detection_default_threshold
+
+    @field_validator("threshold")
+    @classmethod
+    def _threshold_in_range(cls, value: float | None) -> float | None:
+        # Same bound as MonitorBase's identical validator (app/schemas/
+        # monitor.py) — NDVI-diff never exceeds 2.0 since NDVI itself is in
+        # [-1, 1]. Found for real worth adding: nothing previously stopped
+        # a request for e.g. threshold=20 (meant as a percent, not a raw
+        # NDVI-diff value) from creating an analysis that could then never
+        # detect any change at all, silently.
+        if value is not None and not (0 <= value <= 2):
+            raise ValueError(f"threshold must be between 0 and 2 (got {value})")
+        return value
+
+    @model_validator(mode="after")
+    def _dates_are_distinct(self) -> "AnalysisCreate":
+        # BRIEF v2, found for real: nothing stopped date_a == date_b, which
+        # change_detection_pipeline.py would still run (fetching the same
+        # scene for both dates, diffing an image against itself) — a real
+        # Celery job and real compute spent to always report "no change",
+        # which is a confusing, silently-misleading result rather than a
+        # clear rejection at the one point (request time) it's actually
+        # cheap and unambiguous to catch.
+        if self.date_a == self.date_b:
+            raise ValueError("date_a and date_b must be different dates")
+        return self
 
 
 class AnalysisRead(BaseModel):
