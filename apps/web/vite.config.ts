@@ -42,4 +42,24 @@ export default defineConfig({
   server: {
     port: 5173,
   },
+  build: {
+    // The map-vendor chunk below (maplibre-gl + deck.gl) is irreducibly
+    // ~2.4MB minified -- that's the real, accounted-for size of this
+    // locked stack (see CLAUDE.md), not a splitting failure, so the
+    // default 500kB warning threshold is the wrong bar for it.
+    chunkSizeWarningLimit: 2600,
+    rollupOptions: {
+      output: {
+        // The map/rendering stack (maplibre-gl + the deck.gl family) is
+        // legitimately large and changes far less often than app code —
+        // splitting it into its own chunk doesn't shrink the total download,
+        // but it means an app-code-only release doesn't invalidate the
+        // browser's cache of this chunk, and first paint isn't blocked on
+        // parsing app code bundled inline with it.
+        manualChunks: {
+          "map-vendor": ["maplibre-gl", "deck.gl", "@deck.gl/mapbox", "@deck.gl-community/editable-layers"],
+        },
+      },
+    },
+  },
 });

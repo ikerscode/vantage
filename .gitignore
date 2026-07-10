@@ -13,6 +13,10 @@ node_modules/
 dist/
 .vite/
 *.tsbuildinfo
+# tsconfig.node.json's composite build (`tsc -b`, part of `npm run build`)
+# emits vite.config.js right next to the tracked vite.config.ts — a real
+# build byproduct, not source.
+apps/web/vite.config.js
 
 # Rust (apps/launcher) — build output only; Cargo.lock IS tracked
 # (application crate, reproducible builds matter for the packaged app).
