@@ -126,15 +126,21 @@ pub fn run(
     // Keyed to this binary's own version (BRIEF v2): an app upgrade must
     // refresh the container images too — see images.rs's marker_is_current
     // for the real stale-backend bug this closes.
-    match images::ensure_images_loaded(&runtime, &tarball_candidates, &data_dir, env!("CARGO_PKG_VERSION")) {
-        Ok(images::ImageSource::AlreadyLoaded) => {}
-        Ok(images::ImageSource::Tarball) => emit_progress(&app, "loaded images from the offline bundle"),
-        Ok(images::ImageSource::Registry) => emit_progress(&app, "pulled images from the container registry"),
+    let images_changed = match images::ensure_images_loaded(&runtime, &tarball_candidates, &data_dir, env!("CARGO_PKG_VERSION")) {
+        Ok(images::ImageSource::AlreadyLoaded) => false,
+        Ok(images::ImageSource::Tarball) => {
+            emit_progress(&app, "loaded images from the offline bundle");
+            true
+        }
+        Ok(images::ImageSource::Registry) => {
+            emit_progress(&app, "pulled images from the container registry");
+            true
+        }
         Err(e) => {
             emit_failed(&app, format!("couldn't get the required container images: {e}"));
             return;
         }
-    }
+    };
 
     emit_progress(&app, "starting database, object store, and services…");
     let runner = compose::ComposeRunner::new(runtime, compose_file, config_paths.env_file.clone());
@@ -148,6 +154,25 @@ pub fn run(
     let state = app.state::<LauncherState>();
     let runner_guard = state.runner.lock().expect("runner mutex poisoned");
     let runner = runner_guard.as_ref().expect("just set above");
+
+    // BRIEF v2, found while auditing the stale-image fix: re-pulling/re-loading
+    // an image under the SAME tag (1.0.0 — pinned deliberately, see
+    // release.yml) is pointless if `up -d` then just reuses the old,
+    // already-running container. podman-compose 1.5.0's recreate-on-image-
+    // change detection is unreliable, so on an actual image refresh (an app
+    // upgrade), explicitly tear the stack down first to guarantee containers
+    // are recreated from the new images. Only on a real change — a normal
+    // relaunch (AlreadyLoaded) skips this and reuses the running stack, which
+    // is both faster and avoids needless churn.
+    if images_changed {
+        emit_progress(&app, "refreshing services with the updated images…");
+        if let Err(e) = runner.down() {
+            // Non-fatal: a failed/absent teardown just means up() proceeds
+            // against whatever's there, exactly as before this fix — the
+            // health-gate below is still the real source of truth.
+            emit_progress(&app, format!("note: could not tear down the previous stack cleanly: {e}"));
+        }
+    }
 
     match runner.up() {
         // BRIEF v1.8, found for real on a user's Podman install: a non-zero
