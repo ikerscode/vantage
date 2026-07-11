@@ -123,7 +123,10 @@ pub fn run(
         resource_dir.join("infra").join("vantage-images-1.0.0.tar"),
         data_dir.join("vantage-images-1.0.0.tar"),
     ];
-    match images::ensure_images_loaded(&runtime, &tarball_candidates, &data_dir) {
+    // Keyed to this binary's own version (BRIEF v2): an app upgrade must
+    // refresh the container images too — see images.rs's marker_is_current
+    // for the real stale-backend bug this closes.
+    match images::ensure_images_loaded(&runtime, &tarball_candidates, &data_dir, env!("CARGO_PKG_VERSION")) {
         Ok(images::ImageSource::AlreadyLoaded) => {}
         Ok(images::ImageSource::Tarball) => emit_progress(&app, "loaded images from the offline bundle"),
         Ok(images::ImageSource::Registry) => emit_progress(&app, "pulled images from the container registry"),

@@ -5,6 +5,17 @@ import { polygonAreaKm2, polygonCentroid } from "../lib/geo";
 import { useAnalysisStore } from "../store/analysisStore";
 import { useAoiStore } from "../store/aoiStore";
 import { useMapStore } from "../store/mapStore";
+import { pushErrorToast } from "../store/toastStore";
+
+// Mirrors the backend's MAX_AOI_AREA_KM2 (apps/api/app/schemas/geo.py) so a
+// too-big polygon is rejected before it's even sent. BRIEF v2, found for
+// real: with no basemap for scale, a user zoomed out to Z1 drew a
+// 32.5-million-km² AOI (half of Africa) without realizing it -- the imagery
+// search for it matched millions of scenes and hung the UI forever. A
+// fresh backend rejects it at creation too, but an install running older
+// backend images doesn't -- and either way a clear message here beats a
+// bare 422.
+const MAX_AOI_AREA_KM2 = 50_000;
 
 export function AOIPanel() {
   const { data: aois, isLoading } = useAois();
@@ -43,6 +54,14 @@ export function AOIPanel() {
 
   const handleSave = () => {
     if (!draftGeometry || !draftName.trim()) return;
+    const areaKm2 = polygonAreaKm2(draftGeometry);
+    if (areaKm2 > MAX_AOI_AREA_KM2) {
+      pushErrorToast(
+        `This AOI covers ${Math.round(areaKm2).toLocaleString()} km² — the limit is ` +
+          `${MAX_AOI_AREA_KM2.toLocaleString()} km². Zoom in (see the scale bar, bottom right) and draw a smaller area.`,
+      );
+      return;
+    }
     createAoi.mutate(
       { name: draftName.trim(), geometry: draftGeometry },
       {

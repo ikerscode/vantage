@@ -9,12 +9,26 @@ from app.imagery.base import ImagerySource, SceneMetadata
 # band-math inputs, and the SCL cloud mask).
 ASSET_KEYS = ("visual", "red", "green", "blue", "nir", "scl")
 
+# BRIEF v2, found for real on a live install: search() paged through EVERY
+# matching item with no cap and no network timeout. A continent-sized AOI
+# (drawn zoomed-out on a basemap-less map — 32.5M km², an easy real mistake
+# with nothing on screen for scale; newer installs reject it at creation
+# via MAX_AOI_AREA_KM2, but this one predated that) over the frontend's
+# 24-month default window matches MILLIONS of Sentinel-2 items — items()
+# dutifully paged through them, hanging the API request (and the UI waiting
+# on it, with no visible feedback) effectively forever. The scrubber renders
+# individual scene ticks, so beyond a couple hundred scenes nothing more is
+# even displayable — a hard cap loses nothing real. The timeout bounds every
+# underlying HTTP call so a stalled connection can't hang a request either.
+MAX_SEARCH_ITEMS = 200
+REQUEST_TIMEOUT_S = 30
+
 
 class EarthSearchSource(ImagerySource):
     """v1 concrete ImagerySource: Element84 Earth Search v1, public unsigned COGs."""
 
     def __init__(self, stac_api_url: str | None = None):
-        self._client = Client.open(stac_api_url or settings.stac_api_url)
+        self._client = Client.open(stac_api_url or settings.stac_api_url, timeout=REQUEST_TIMEOUT_S)
 
     def search(
         self,
@@ -31,6 +45,7 @@ class EarthSearchSource(ImagerySource):
             intersects=geometry,
             datetime=f"{date_from.isoformat()}/{date_to.isoformat()}",
             query=query,
+            max_items=MAX_SEARCH_ITEMS,
         )
 
         scenes = []

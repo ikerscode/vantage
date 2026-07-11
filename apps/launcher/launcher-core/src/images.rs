@@ -47,12 +47,29 @@ pub const REQUIRED_IMAGES: &[(&str, &str)] = &[
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageSource {
-    /// The marker from a previous successful run was already present.
+    /// The marker from a previous successful run of THIS app version was
+    /// already present.
     AlreadyLoaded,
     /// Loaded from a local (bundled or operator-provided) tarball.
     Tarball,
     /// Pulled from the container registry (thin/online installer path).
     Registry,
+}
+
+/// BRIEF v2, found for real on a live install: the marker used to be a
+/// bare "ok" written once, ever — so an app upgrade NEVER refreshed the
+/// container images. Image references are deliberately pinned to a stable
+/// tag (1.0.0 — see release.yml's publish-images comments for why), and
+/// each release re-pushes that tag with current code, so an installed
+/// machine could carry a months-stale backend forever while the launcher
+/// updated around it (confirmed live: an API missing input validation
+/// shipped 3 releases earlier accepted a 32.5M-km² AOI whose imagery
+/// search then hung the whole UI). The marker now records WHICH app
+/// version loaded images; any mismatch (including the legacy "ok"
+/// content) re-loads/re-pulls, which is cheap when nothing changed
+/// (layer-cached) and correct when something did.
+fn marker_is_current(marker: &Path, app_version: &str) -> bool {
+    fs::read_to_string(marker).map(|content| content.trim() == app_version).unwrap_or(false)
 }
 
 fn runtime_binary(runtime: &ContainerRuntime) -> &'static str {
@@ -73,9 +90,10 @@ pub fn ensure_images_loaded(
     runtime: &ContainerRuntime,
     tarball_candidates: &[PathBuf],
     data_dir: &Path,
+    app_version: &str,
 ) -> io::Result<ImageSource> {
     let marker = data_dir.join("config").join(".images-loaded");
-    if marker.exists() {
+    if marker_is_current(&marker, app_version) {
         return Ok(ImageSource::AlreadyLoaded);
     }
 
@@ -89,7 +107,7 @@ pub fn ensure_images_loaded(
                 String::from_utf8_lossy(&output.stderr)
             )));
         }
-        write_marker(&marker)?;
+        write_marker(&marker, app_version)?;
         return Ok(ImageSource::Tarball);
     }
 
@@ -107,7 +125,7 @@ pub fn ensure_images_loaded(
             )));
         }
     }
-    write_marker(&marker)?;
+    write_marker(&marker, app_version)?;
     Ok(ImageSource::Registry)
 }
 
@@ -122,11 +140,11 @@ fn actionable_no_images_error(ghcr_ref: &str, pull: &Output) -> String {
     )
 }
 
-fn write_marker(marker: &Path) -> io::Result<()> {
+fn write_marker(marker: &Path, app_version: &str) -> io::Result<()> {
     if let Some(parent) = marker.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(marker, "ok")
+    fs::write(marker, app_version)
 }
 
 fn run_load(runtime: &ContainerRuntime, tarball_path: &Path) -> io::Result<Output> {
@@ -150,15 +168,38 @@ mod tests {
         let data_dir = tempfile::tempdir().unwrap();
         let marker_dir = data_dir.path().join("config");
         fs::create_dir_all(&marker_dir).unwrap();
-        fs::write(marker_dir.join(".images-loaded"), "ok").unwrap();
+        fs::write(marker_dir.join(".images-loaded"), "0.1.20").unwrap();
 
-        // Even pointing at candidates that don't exist, the marker alone
-        // must be enough to skip — proves we check the marker BEFORE
-        // touching the filesystem for any candidate tarball (and, by the
-        // same logic, before ever attempting a registry pull).
+        // Even pointing at candidates that don't exist, a marker matching
+        // this app version must be enough to skip — proves we check the
+        // marker BEFORE touching the filesystem for any candidate tarball
+        // (and, by the same logic, before ever attempting a registry pull).
         let candidates = vec![data_dir.path().join("images.tar")];
-        let result = ensure_images_loaded(&ContainerRuntime::Docker, &candidates, data_dir.path()).unwrap();
+        let result =
+            ensure_images_loaded(&ContainerRuntime::Docker, &candidates, data_dir.path(), "0.1.20").unwrap();
         assert_eq!(result, ImageSource::AlreadyLoaded);
+    }
+
+    #[test]
+    fn marker_from_an_older_app_version_does_not_short_circuit() {
+        // The real upgrade bug (BRIEF v2, found live): the marker used to
+        // be version-blind, so images loaded once were NEVER refreshed —
+        // an install could run a months-stale backend forever. A marker
+        // from any other version (including the legacy "ok" content, which
+        // every pre-fix install has on disk) must NOT count as current.
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join(".images-loaded");
+
+        fs::write(&marker, "0.1.19").unwrap();
+        assert!(!marker_is_current(&marker, "0.1.20"), "an older version's marker must not be treated as current");
+
+        fs::write(&marker, "ok").unwrap();
+        assert!(!marker_is_current(&marker, "0.1.20"), "the legacy 'ok' marker must not be treated as current");
+
+        assert!(!marker_is_current(&dir.path().join("missing"), "0.1.20"), "a missing marker is never current");
+
+        fs::write(&marker, "0.1.20\n").unwrap();
+        assert!(marker_is_current(&marker, "0.1.20"), "same version (even with trailing whitespace) is current");
     }
 
     // BRIEF v1.6/v1.7: the tarball ships as a separate operator download

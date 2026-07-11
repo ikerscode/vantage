@@ -151,23 +151,25 @@ export function MapCanvas() {
     clearFlyToRequest();
   }, [flyToRequest, clearFlyToRequest]);
 
-  // BRIEF v2, found for real: MapLibre's own dragPan/doubleClickZoom
-  // handlers consume the mousedown/dblclick before deck.gl's
-  // EditableGeoJsonLayer ever sees it (a well-documented deck.gl+Mapbox/
-  // MapLibre integration limitation, not a bug in our layer config —
-  // MapboxOverlay only forwards a subset of pointer events to deck.gl,
-  // and does so AFTER the base map's own handlers have already acted on
-  // them). Without this, clicking to add a vertex just pans the map
-  // instead. Disabling both while drawing (and double-click, which
-  // DrawPolygonMode uses to finish a ring) is the standard fix.
+  // While drawing, only doubleClickZoom is disabled — DrawPolygonMode uses
+  // double-click to finish the ring, and MapLibre would otherwise zoom on
+  // that same gesture. dragPan deliberately stays ENABLED (BRIEF v2, two
+  // rounds of live testing): it was originally disabled too, back when
+  // clicks were being eaten before deck.gl saw them — but the real cause of
+  // that was overlaid-mode event forwarding, since fixed properly with
+  // MapboxOverlay's interleaved mode (see the overlay construction above).
+  // With clicks genuinely reaching EditableGeoJsonLayer, a plain click (no
+  // movement) adds a vertex without triggering dragPan at all — and keeping
+  // dragPan on means you can still pan/zoom mid-draw to reach the far side
+  // of a large area, instead of being locked to whatever was on screen when
+  // you clicked DRAW (found for real: a user who couldn't navigate mid-draw
+  // ended up drawing a continent-sized AOI from a zoomed-out view instead).
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     if (isDrawing) {
-      map.dragPan.disable();
       map.doubleClickZoom.disable();
     } else {
-      map.dragPan.enable();
       map.doubleClickZoom.enable();
     }
   }, [isDrawing]);
