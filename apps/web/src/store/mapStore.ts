@@ -34,7 +34,10 @@ interface MapState {
 export const useMapStore = create<MapState>((set) => ({
   mode: "explore",
   setMode: (mode) => set({ mode }),
-  viewState: { longitude: 0, latitude: 20, zoom: 2, pitch: 0, bearing: 0 },
+  // Opens at a regional zoom, not world scale — see MapCanvas's MIN_ZOOM
+  // (the map also enforces that as a hard floor). A fresh install with no
+  // AOIs yet still lands somewhere you could immediately draw a usable one.
+  viewState: { longitude: 0, latitude: 20, zoom: 5, pitch: 0, bearing: 0 },
   setViewState: (viewState) => set({ viewState }),
   cursorLatLon: null,
   setCursorLatLon: (cursorLatLon) => set({ cursorLatLon }),

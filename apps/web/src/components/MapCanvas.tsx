@@ -27,6 +27,19 @@ const DETECTION_SELECTED_LINE: [number, number, number, number] = [95, 211, 238,
 
 const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection" as const, features: [] };
 
+// BRIEF v2, found for real on a live install: with no basemap for scale, a
+// user zoomed all the way out (Z1, ~world span) and drew a 32-million-km²
+// AOI — whose imagery search matched millions of scenes and hung the UI.
+// A minimum zoom is the root-cause fix for that whole class of problem: it
+// caps how large an area can be framed (and therefore drawn) at once. Z5
+// spans very roughly ~1,500 km across at mid-latitudes — comfortably more
+// than enough to frame any AOI up to the backend's 50,000 km² cap
+// (apps/api/app/schemas/geo.py) with margin to spare, while making a
+// continent-scale draw physically impossible. It also keeps the map at or
+// above the true-color COG's own minzoom range in normal use, so imagery
+// is far more likely to actually be visible wherever you can draw.
+const MIN_ZOOM = 5;
+
 export function MapCanvas() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -68,7 +81,8 @@ export function MapCanvas() {
       container: containerRef.current,
       style: darkVoidStyle,
       center: [viewState.longitude, viewState.latitude],
-      zoom: viewState.zoom,
+      zoom: Math.max(viewState.zoom, MIN_ZOOM),
+      minZoom: MIN_ZOOM,
       pitch: viewState.pitch,
       bearing: viewState.bearing,
       attributionControl: false,
@@ -289,7 +303,16 @@ export function MapCanvas() {
         return;
       }
       if (!map.getSource(sourceId)) {
-        map.addSource(sourceId, { type: "raster", url, tileSize: 256 });
+        // minzoom is forced to the map's own floor, overriding whatever the
+        // tilejson advertises (BRIEF v2, found for real): a Sentinel-2
+        // true-color COG's tilejson reports minzoom 8 (derived from its
+        // overview count), so MapLibre wouldn't request a single tile below
+        // Z8 — imagery stayed blank at exactly the regional zooms you
+        // navigate and draw at, even though the tiler happily renders those
+        // tiles on request (verified: z5/z6/z7 all return real imagery).
+        // NDVI's tilejson already reports minzoom 0, which is why it showed
+        // and true-color didn't — this closes that asymmetry.
+        map.addSource(sourceId, { type: "raster", url, tileSize: 256, minzoom: MIN_ZOOM });
       }
       if (!map.getLayer(id)) {
         map.addLayer({ id, type: "raster", source: sourceId, paint: { "raster-opacity": opacity } });
