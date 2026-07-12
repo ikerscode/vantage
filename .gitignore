@@ -64,3 +64,6 @@ services/inference/weights/*.pth
 # git history; reproducible via prepare_dataset.py/train.py/evaluate.py.
 scripts/train_vessel_detector/data/
 scripts/train_vessel_detector/.venv/
+
+# tsc -b emits a declaration file next to the Vite config — build artifact
+apps/web/vite.config.d.ts

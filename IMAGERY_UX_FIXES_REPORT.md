@@ -158,9 +158,65 @@ it. If you want a different accent (amber/tactical-green/etc.), it's a one-token
 change (`--accent` / `--accent-bright` / `--accent-dim` in `styles.css`) — say
 the word and I'll swap it.
 
-## Files touched
+## Files touched (passes 1–2)
 
 Frontend: `api/client.ts`, `api/stac.ts`, `store/{analysis,map,toast}Store.ts`,
 `main.tsx`, `App.tsx`, `components/{MapCanvas,LayersControl,TemporalScrubber,`
 `ResultsFeed,AOIPanel,GlobalActivityBar}.tsx`, `styles.css`. Backend:
 `packages/geo/src/vantage_geo/diff.py`.
+
+---
+
+## 8. Full audit, operator features, security + architecture (third pass)
+
+Verification up front (this sandbox has podman but the checks below are what
+ran): `apps/web` `tsc -b` + `vite build` clean; **geo 14 / api 36 / tiler 13**
+unit tests pass; weapons-boundary gate green.
+
+**Code analysis.** All suites green. Fixed a real defect I'd introduced: the
+graticule (below) first rebuilt every deck vector layer on each pan, which
+could churn the editable draw layer mid-draw — moved it to a native MapLibre
+line layer updated imperatively on `moveend`.
+
+**Design (against the artifact-design skill's AI-tell list).** Verdict: not in
+cliché territory — near-black+cyan is the project's *own locked system* (not a
+lone random pop), IBM Plex (engineered) not Inter/Space-Grotesk, restrained
+radii, edge-anchored not centred. Added, tastefully: an honest **boot
+sequence** (`BootSequence.tsx`) tied to real auth/tiler readiness with a
+min-dwell + hard-timeout + reduced-motion skip; a client-side **graticule**
+(real lat/lon structure over the void — subject-true, air-gap safe); a subtle
+optical **vignette**; cool-biased neutrals; instrument tick before panel titles.
+
+**Operator features (analysis-only, inside CLAUDE.md §1).** **MGRS** — the
+coordinate frame NATO/allied forces actually use. New `lib/mgrs.ts` (WGS84↔UTM↔
+MGRS), wired as a live `GRID` readout in the status strip and as grid-reference
+input in the command bar (type "18S UJ 2340 0645" to navigate). Verified: the
+meridional arc matches the textbook M(45°) constant exactly, Null Island exact,
+and forward→inverse round-trips to **sub-metre** across both hemispheres. The
+in-parallel **compass / north-up** control was completed alongside.
+
+**Security (network-engineer pass).** Findings fixed:
+- Tiler and inference shared-token checks used a plain `!=` — a timing
+  side-channel on the secret. Now `hmac.compare_digest` (matching the dev-token
+  path). (`services/tiler/app/security.py`, `services/inference/app/security.py`)
+- `DEV_TOKEN_SECRET` — which grants token issuance from *any* origin when set —
+  was not covered by the SEC-04 production weak-secret refusal. A short custom
+  value was remotely brute-forceable. Now refused in production (default stays
+  allowed because it's deliberately disabled). Regression tests added.
+  (`apps/api/app/core/config.py`, `tests/test_config.py`)
+- Reviewed and confirmed already-solid: DNS-rebinding-aware SSRF gate + `s3://`/
+  `file://` path-traversal resolution (tiler), SSE auth via `Authorization`
+  header (no token-in-URL), decompression-bomb caps wired (`Image.MAX_IMAGE_PIXELS`
+  + content-length), parameterised SQLAlchemy (no raw SQL), specific CORS origins.
+  Residual (documented, not quick-fixable): app-level SSRF DNS check has an
+  inherent TOCTOU window vs. GDAL's fetch; CORS `*` isn't explicitly refused in
+  prod.
+
+**Architecture / bloat.** Untracked `run_artifacts/` (20 files, regenerable run
+outputs — already in `.gitignore`, never written by CI, so tracking them was an
+inconsistency); removed a stray `vite.config.d.ts` build artifact and ignored
+it. **Did not delete** the `*_REPORT.md` audit trail — CLAUDE.md §3/§6 treats
+those as load-bearing "prove-it" evidence, so removing them would destroy
+traceability, not reduce bloat. No orphaned source files found.
+
+New files: `components/BootSequence.tsx`, `components/Compass.tsx`, `lib/mgrs.ts`.

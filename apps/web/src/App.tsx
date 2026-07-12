@@ -2,7 +2,9 @@ import { useEffect } from "react";
 
 import { useDevAuthBootstrap } from "./api/auth";
 import { AOIPanel } from "./components/AOIPanel";
+import { BootSequence } from "./components/BootSequence";
 import { CommandBar } from "./components/CommandBar";
+import { Compass } from "./components/Compass";
 import { GlobalActivityBar } from "./components/GlobalActivityBar";
 import { Inspector } from "./components/Inspector";
 import { LayersControl } from "./components/LayersControl";
@@ -34,6 +36,8 @@ export function App() {
   return (
     <div className="hud-shell">
       <MapCanvas />
+      <div className="viewport-frame" aria-hidden="true" />
+      <BootSequence />
       <GlobalActivityBar />
       <div className="hud-overlay">
         <div className="hud-statusstrip">
@@ -58,6 +62,7 @@ export function App() {
           <ResultsFeed />
         </div>
 
+        <Compass />
         <TemporalScrubber />
         <ToastStack />
       </div>

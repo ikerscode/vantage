@@ -31,6 +31,11 @@ interface MapState {
   flyToRequest: { longitude: number; latitude: number; zoom?: number; instant?: boolean } | null;
   requestFlyTo: (target: { longitude: number; latitude: number; zoom?: number; instant?: boolean }) => void;
   clearFlyToRequest: () => void;
+  // Bumped by the compass to ask MapCanvas to rotate the map back to north-up
+  // (bearing 0, pitch 0). A nonce rather than a boolean so repeated presses
+  // always re-fire even when already near north.
+  northUpNonce: number;
+  requestNorthUp: () => void;
 }
 
 export const useMapStore = create<MapState>((set) => ({
@@ -46,4 +51,6 @@ export const useMapStore = create<MapState>((set) => ({
   flyToRequest: null,
   requestFlyTo: (flyToRequest) => set({ flyToRequest }),
   clearFlyToRequest: () => set({ flyToRequest: null }),
+  northUpNonce: 0,
+  requestNorthUp: () => set((s) => ({ northUpNonce: s.northUpNonce + 1 })),
 }));

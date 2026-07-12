@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { useAois } from "../api/aois";
+import { latLonToMGRS } from "../lib/mgrs";
 import { getRuntimeConfig } from "../lib/runtimeConfig";
 import { scaleBarLabel } from "../lib/scaleBar";
 import { useMonitorAlertStatus } from "../lib/monitorAlerts";
@@ -40,11 +41,22 @@ export function StatusStrip() {
     ? `${Math.abs(cursorLatLon.lat).toFixed(4)}°${cursorLatLon.lat >= 0 ? "N" : "S"} ${Math.abs(cursorLatLon.lon).toFixed(4)}°${cursorLatLon.lon >= 0 ? "E" : "W"}`
     : "—";
 
+  // MGRS grid of the cursor (falls back to the map centre when the pointer is
+  // off the map) — the coordinate frame NATO/allied forces actually operate in.
+  const gridLat = cursorLatLon?.lat ?? viewState.latitude;
+  const gridLon = cursorLatLon?.lon ?? viewState.longitude;
+  const mgrs = latLonToMGRS(gridLat, gridLon) ?? "OUT OF UTM";
+
   return (
     <div className={isAnyAlert ? "panel status-strip alert-active" : "panel status-strip"}>
       <div className="status-segment">
         <span className="status-label">CUR</span>
         <span className="status-value">{curText}</span>
+      </div>
+      <div className="status-divider" />
+      <div className="status-segment">
+        <span className="status-label">GRID</span>
+        <span className="status-value-accent" title="Military Grid Reference System (WGS84)">{mgrs}</span>
       </div>
       <div className="status-divider" />
       <div className="status-segment">

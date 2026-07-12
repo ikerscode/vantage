@@ -39,6 +39,7 @@ string-prefix-matched, which `..` traversal would defeat) before the
 containment check, never an arbitrary caller-supplied path.
 """
 
+import hmac
 import ipaddress
 import os
 import socket
@@ -137,5 +138,9 @@ def validated_url(url: Annotated[str, Query(description="Dataset URL")]) -> str:
 
 def require_tiler_token(x_tiler_token: Annotated[str | None, Header()] = None) -> None:
     expected = os.environ.get("TILER_TOKEN", "change-me-dev-tiler-token")
-    if x_tiler_token != expected:
+    # Constant-time compare: a plain `!=` short-circuits on the first differing
+    # byte, leaking the secret's length/prefix to anyone who can reach the port
+    # and time the responses. compare_digest is the same primitive already used
+    # for the dev-token secret in apps/api.
+    if x_tiler_token is None or not hmac.compare_digest(x_tiler_token.encode(), expected.encode()):
         raise HTTPException(status_code=401, detail="missing or invalid X-Tiler-Token header")

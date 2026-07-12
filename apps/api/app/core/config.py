@@ -131,6 +131,17 @@ class Settings(BaseSettings):
             offenders.append("TILER_TOKEN")
         if _weak(self.inference_token):
             offenders.append("INFERENCE_TOKEN")
+        # DEV_TOKEN_SECRET is special: the default is deliberately DISABLED
+        # (auth.py's _has_valid_dev_token_secret rejects it), so a default here
+        # is safe and must not block boot. But a *custom* value that's too
+        # short is a real hole — it grants dev-token issuance from ANY origin
+        # (not just loopback) to whoever presents it, so a guessable one is
+        # remotely brute-forceable. Refuse only the short-but-non-default case.
+        if (
+            self.dev_token_secret not in _KNOWN_DEFAULT_SECRETS
+            and len(self.dev_token_secret) < _MIN_PRODUCTION_SECRET_LENGTH
+        ):
+            offenders.append("DEV_TOKEN_SECRET")
 
         db_password = urlparse(self.database_url).password or ""
         if _weak(db_password):

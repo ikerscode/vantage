@@ -1,5 +1,0 @@
-{
-  "type": "FeatureCollection",
-  "note": "Real query result against a completed real-Sentinel-2 analysis (production SCORE_THRESHOLD=0.5). Empty is the honest, expected outcome for a COCO-pretrained placeholder detector on farmland/airport imagery -- see RUN_REPORT.md and run_artifacts/detections-diagnostic.json for proof the underlying plumbing (chip->inference->geo-box->S3->DB) works when the detector does emit boxes.",
-  "features": []
-}

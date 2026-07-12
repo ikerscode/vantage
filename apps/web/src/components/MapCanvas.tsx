@@ -45,14 +45,16 @@ const PULSE_DIM = 0.38;
 const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection" as const, features: [] };
 
 // ---- Graticule ------------------------------------------------------------
-// A quiet lat/lon grid rendered client-side over the whole map. This is the
-// map's answer to "the void is featureless": real cartographic structure —
-// actual coordinates, the plotting-board vernacular of this domain — instead
-// of decoration, and generated locally so it costs nothing and works
-// air-gapped (no tiles involved). Neutral grey only (the accent never touches
-// map-space content); major lines land on 5× the minor spacing.
-const GRATICULE_MINOR: [number, number, number, number] = [139, 148, 158, 20];
-const GRATICULE_MAJOR: [number, number, number, number] = [139, 148, 158, 40];
+// A quiet lat/lon grid drawn client-side over the whole map. This is the map's
+// answer to "the void is featureless": real cartographic structure — actual
+// coordinates, the plotting-board vernacular of this domain — instead of
+// decoration, generated locally so it costs nothing and works air-gapped (no
+// tiles involved). Rendered as a NATIVE MapLibre line layer (not deck) so it
+// updates imperatively on moveend without churning the interactive/editable
+// deck layers on top. Neutral grey only — the accent never touches map-space
+// content; major lines land on every 5th line.
+const GRATICULE_MINOR = "rgba(139, 148, 158, 0.14)";
+const GRATICULE_MAJOR = "rgba(139, 148, 158, 0.26)";
 // Spacing ladder chosen so roughly 6–14 lines are on screen at any zoom.
 const GRATICULE_STEPS = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 5];
 
@@ -131,6 +133,7 @@ export function MapCanvas() {
   const setCursorLatLon = useMapStore((s) => s.setCursorLatLon);
   const flyToRequest = useMapStore((s) => s.flyToRequest);
   const clearFlyToRequest = useMapStore((s) => s.clearFlyToRequest);
+  const northUpNonce = useMapStore((s) => s.northUpNonce);
 
   const { data: aois } = useAois();
   const selectedAoiId = useAoiStore((s) => s.selectedAoiId);
@@ -242,7 +245,32 @@ export function MapCanvas() {
     map.addControl(overlay as unknown as maplibregl.IControl);
     overlayRef.current = overlay;
 
+    // Graticule: a native MapLibre line layer sitting just above the void
+    // background (so imagery covers it where it exists, and it gives the empty
+    // void real coordinate structure where it doesn't). Re-generated on
+    // moveend — a few dozen two-point lines, far cheaper than one tile.
+    const drawGraticule = () => {
+      const src = map.getSource("graticule") as maplibregl.GeoJSONSource | undefined;
+      if (src) src.setData(buildGraticule(map));
+    };
+    const initGraticule = () => {
+      if (map.getSource("graticule")) return;
+      map.addSource("graticule", { type: "geojson", data: buildGraticule(map) });
+      map.addLayer({
+        id: "graticule-layer",
+        type: "line",
+        source: "graticule",
+        paint: {
+          "line-color": ["case", ["get", "major"], GRATICULE_MAJOR, GRATICULE_MINOR] as unknown as string,
+          "line-width": ["case", ["get", "major"], 1, 0.5] as unknown as number,
+        },
+      });
+    };
+    if (map.isStyleLoaded()) initGraticule();
+    else map.once("load", initGraticule);
+
     map.on("moveend", () => {
+      drawGraticule();
       const center = map.getCenter();
       setViewState({
         longitude: center.lng,
@@ -288,6 +316,13 @@ export function MapCanvas() {
     clearFlyToRequest();
   }, [flyToRequest, clearFlyToRequest]);
 
+  // Compass "reset north" — rotate/level back to north-up. Skips the initial
+  // mount (nonce 0) so it doesn't fire a no-op animation on load.
+  useEffect(() => {
+    if (!northUpNonce || !mapRef.current) return;
+    mapRef.current.easeTo({ bearing: 0, pitch: 0, duration: 300 });
+  }, [northUpNonce]);
+
   // While drawing, only doubleClickZoom is disabled — DrawPolygonMode uses
   // double-click to finish the ring, and MapLibre would otherwise zoom on
   // that same gesture. dragPan deliberately stays ENABLED (BRIEF v2, two
@@ -311,25 +346,11 @@ export function MapCanvas() {
     }
   }, [isDrawing]);
 
-  // Vector layers: graticule, saved AOIs, the in-progress AOI draw layer,
-  // detection boxes.
+  // Vector layers: saved AOIs, the in-progress AOI draw layer, detection boxes.
+  // (The graticule is a native MapLibre layer, not here — see its own effect.)
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
-
-    // Rebuilt on every moveend (viewState is a dep) — generation is a few
-    // dozen two-point lines, far cheaper than one tile fetch.
-    const graticuleLayer = new GeoJsonLayer({
-      id: "graticule",
-      data: mapRef.current ? buildGraticule(mapRef.current) : EMPTY_FEATURE_COLLECTION,
-      pickable: false,
-      stroked: true,
-      filled: false,
-      getLineColor: (f: { properties: { major: boolean } }) =>
-        f.properties.major ? GRATICULE_MAJOR : GRATICULE_MINOR,
-      lineWidthUnits: "pixels",
-      getLineWidth: (f: { properties: { major: boolean } }) => (f.properties.major ? 1 : 0.5),
-    });
 
     const savedAoisLayer = new GeoJsonLayer({
       id: "saved-aois",
@@ -424,7 +445,7 @@ export function MapCanvas() {
       },
     });
 
-    overlay.setProps({ layers: [graticuleLayer, savedAoisLayer, drawLayer, detectionsLayer] });
+    overlay.setProps({ layers: [savedAoisLayer, drawLayer, detectionsLayer] });
   }, [
     aois,
     selectedAoiId,
@@ -434,7 +455,6 @@ export function MapCanvas() {
     detectionsVisible,
     inspectorTarget,
     pulseLevel,
-    viewState,
     setSelectedAoiId,
     setDraftGeometry,
     setInspectorTarget,

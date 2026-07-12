@@ -46,6 +46,36 @@ def test_production_boots_cleanly_with_real_generated_secrets():
     assert settings.vantage_env == "production"
 
 
+def _prod_kwargs(**overrides):
+    base = dict(
+        _env_file=None,
+        vantage_env="production",
+        jwt_secret=_real_secret(48),
+        s3_secret_access_key=_real_secret(32),
+        tiler_token=_real_secret(48),
+        inference_token=_real_secret(48),
+        database_url=f"postgresql+psycopg://vantage_app:{_real_secret(32)}@db:5432/vantage",
+    )
+    base.update(overrides)
+    return base
+
+
+def test_production_allows_the_default_dev_token_secret_because_it_is_disabled():
+    # The DEV_TOKEN_SECRET default is deliberately neutralized in auth.py
+    # (_has_valid_dev_token_secret rejects it), so leaving it at the default
+    # must NOT block a production boot — otherwise every loopback-only install
+    # would be forced to set a secret it doesn't use.
+    settings = Settings(**_prod_kwargs(dev_token_secret="change-me-dev-token-secret"))
+    assert settings.vantage_env == "production"
+
+
+def test_production_refuses_a_short_custom_dev_token_secret():
+    # A short, guessable custom DEV_TOKEN_SECRET is remotely brute-forceable —
+    # it grants dev-token issuance from ANY origin, not just loopback.
+    with pytest.raises(ValidationError, match="DEV_TOKEN_SECRET"):
+        Settings(**_prod_kwargs(dev_token_secret="abc"))
+
+
 def test_production_error_names_every_weak_secret_at_once():
     # A single refusal that lists every offender is more useful to an
     # operator than failing one field at a time across repeated boots.

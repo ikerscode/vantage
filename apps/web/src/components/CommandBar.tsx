@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useAois } from "../api/aois";
 import { polygonAreaKm2, polygonCentroid } from "../lib/geo";
+import { mgrsToLatLon } from "../lib/mgrs";
 import { useAoiStore } from "../store/aoiStore";
 import { useAnalysisStore } from "../store/analysisStore";
 import { useMapStore } from "../store/mapStore";
@@ -10,6 +11,8 @@ interface CoordMatch {
   kind: "coord";
   lat: number;
   lon: number;
+  // "MGRS" when entered as a military grid reference, else decimal lat/lon.
+  source: "COORD" | "MGRS";
 }
 interface AoiMatch {
   kind: "aoi";
@@ -78,8 +81,16 @@ export function CommandBar() {
   const trimmed = query.trim();
   const matches: Match[] = [];
   if (trimmed) {
-    const coord = parseCoordinate(trimmed);
-    if (coord) matches.push({ kind: "coord", lat: coord.lat, lon: coord.lon });
+    // Military grid reference takes precedence (e.g. "18S UJ 2340 0645") —
+    // it's the coordinate frame the operator is most likely typing; fall back
+    // to decimal lat/lon.
+    const grid = mgrsToLatLon(trimmed);
+    if (grid) {
+      matches.push({ kind: "coord", lat: grid.lat, lon: grid.lon, source: "MGRS" });
+    } else {
+      const coord = parseCoordinate(trimmed);
+      if (coord) matches.push({ kind: "coord", lat: coord.lat, lon: coord.lon, source: "COORD" });
+    }
     const lower = trimmed.toLowerCase();
     for (const aoi of aois ?? []) {
       if (aoi.name.toLowerCase().includes(lower)) {
@@ -132,7 +143,7 @@ export function CommandBar() {
         <input
           ref={inputRef}
           className="command-bar-input"
-          placeholder="Jump to coordinates or AOI…"
+          placeholder="Jump to grid ref, coordinates, or AOI…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setFocused(true)}
@@ -149,7 +160,7 @@ export function CommandBar() {
               className={i === 0 ? "command-bar-result-row top-match" : "command-bar-result-row"}
               onMouseDown={() => jumpTo(match)}
             >
-              <span className="command-bar-kind-chip">{match.kind === "coord" ? "COORD" : "AOI"}</span>
+              <span className="command-bar-kind-chip">{match.kind === "coord" ? match.source : "AOI"}</span>
               {match.kind === "coord" ? (
                 <>
                   <span className="command-bar-value-mono">
