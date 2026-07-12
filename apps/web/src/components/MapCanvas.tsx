@@ -44,6 +44,58 @@ const PULSE_DIM = 0.38;
 
 const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection" as const, features: [] };
 
+// ---- Graticule ------------------------------------------------------------
+// A quiet lat/lon grid rendered client-side over the whole map. This is the
+// map's answer to "the void is featureless": real cartographic structure —
+// actual coordinates, the plotting-board vernacular of this domain — instead
+// of decoration, and generated locally so it costs nothing and works
+// air-gapped (no tiles involved). Neutral grey only (the accent never touches
+// map-space content); major lines land on 5× the minor spacing.
+const GRATICULE_MINOR: [number, number, number, number] = [139, 148, 158, 20];
+const GRATICULE_MAJOR: [number, number, number, number] = [139, 148, 158, 40];
+// Spacing ladder chosen so roughly 6–14 lines are on screen at any zoom.
+const GRATICULE_STEPS = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 5];
+
+function graticuleSpacing(spanDeg: number): number {
+  const target = spanDeg / 8;
+  return GRATICULE_STEPS.find((s) => s >= target) ?? 10;
+}
+
+function buildGraticule(map: maplibregl.Map) {
+  const bounds = map.getBounds();
+  const west = bounds.getWest();
+  const east = bounds.getEast();
+  const south = Math.max(bounds.getSouth(), -85);
+  const north = Math.min(bounds.getNorth(), 85);
+  const spacing = graticuleSpacing(Math.max(east - west, north - south));
+
+  const features: {
+    type: "Feature";
+    geometry: { type: "LineString"; coordinates: [number, number][] };
+    properties: { major: boolean };
+  }[] = [];
+  // Integer line indices (not `lon += spacing`) so float drift can't skew the
+  // grid, and `i % 5` cleanly marks every fifth line as major.
+  for (let i = Math.floor(west / spacing); i <= Math.ceil(east / spacing); i++) {
+    const lon = i * spacing;
+    features.push({
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: [[lon, south], [lon, north]] },
+      properties: { major: i % 5 === 0 },
+    });
+  }
+  for (let i = Math.floor(south / spacing); i <= Math.ceil(north / spacing); i++) {
+    const lat = i * spacing;
+    if (lat < -85 || lat > 85) continue;
+    features.push({
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: [[west, lat], [east, lat]] },
+      properties: { major: i % 5 === 0 },
+    });
+  }
+  return { type: "FeatureCollection" as const, features };
+}
+
 // BRIEF v2, found for real on a live install: with no basemap for scale, a
 // user zoomed all the way out (Z1, ~world span) and drew a 32-million-km²
 // AOI — whose imagery search matched millions of scenes and hung the UI.
@@ -259,10 +311,25 @@ export function MapCanvas() {
     }
   }, [isDrawing]);
 
-  // Vector layers: saved AOIs, the in-progress AOI draw layer, detection boxes.
+  // Vector layers: graticule, saved AOIs, the in-progress AOI draw layer,
+  // detection boxes.
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
+
+    // Rebuilt on every moveend (viewState is a dep) — generation is a few
+    // dozen two-point lines, far cheaper than one tile fetch.
+    const graticuleLayer = new GeoJsonLayer({
+      id: "graticule",
+      data: mapRef.current ? buildGraticule(mapRef.current) : EMPTY_FEATURE_COLLECTION,
+      pickable: false,
+      stroked: true,
+      filled: false,
+      getLineColor: (f: { properties: { major: boolean } }) =>
+        f.properties.major ? GRATICULE_MAJOR : GRATICULE_MINOR,
+      lineWidthUnits: "pixels",
+      getLineWidth: (f: { properties: { major: boolean } }) => (f.properties.major ? 1 : 0.5),
+    });
 
     const savedAoisLayer = new GeoJsonLayer({
       id: "saved-aois",
@@ -357,7 +424,7 @@ export function MapCanvas() {
       },
     });
 
-    overlay.setProps({ layers: [savedAoisLayer, drawLayer, detectionsLayer] });
+    overlay.setProps({ layers: [graticuleLayer, savedAoisLayer, drawLayer, detectionsLayer] });
   }, [
     aois,
     selectedAoiId,
@@ -367,6 +434,7 @@ export function MapCanvas() {
     detectionsVisible,
     inspectorTarget,
     pulseLevel,
+    viewState,
     setSelectedAoiId,
     setDraftGeometry,
     setInspectorTarget,

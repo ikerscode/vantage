@@ -3,17 +3,19 @@
    component spec these are keyed to.
    ============================================================ */
 :root {
-  /* Surface / neutrals */
+  /* Surface / neutrals — deliberately hue-biased toward the accent (a grey
+     that leans cyan reads as chosen, not defaulted): every neutral below sits
+     a few degrees cool of pure grey, matching the instrument-glass world. */
   --bg-void: #06080b;
   --panel: rgba(13, 17, 23, 0.88);
   --panel-raised: rgba(22, 27, 34, 0.92);
-  --hairline: rgba(139, 148, 158, 0.16);
-  --hairline-strong: rgba(139, 148, 158, 0.28);
+  --hairline: rgba(127, 152, 163, 0.16);
+  --hairline-strong: rgba(127, 152, 163, 0.3);
 
-  /* Text */
+  /* Text — same cool bias as the surfaces */
   --text-primary: #e6edf3;
-  --text-secondary: #8b949e;
-  --text-tertiary: #565e68;
+  --text-secondary: #8b98a1;
+  --text-tertiary: #57616a;
 
   /* Accent — one, cool cyan. Chrome/interactive only, never on data. */
   --accent: #3fb8d4;
@@ -331,6 +333,21 @@ button {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* Instrument-label tick: a short accent dash before every section title —
+   the one place panel chrome carries the accent, same device as a console's
+   engraved section markers. */
+.panel-title::before {
+  content: "";
+  width: 8px;
+  height: 1px;
+  background: var(--accent);
+  opacity: 0.55;
+  flex: none;
 }
 
 .panel-header-meta {
