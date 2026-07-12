@@ -3,7 +3,7 @@ import { MapboxOverlay } from "@deck.gl/mapbox";
 import { GeoJsonLayer } from "deck.gl";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useAnalysis } from "../api/analyses";
 import { useAois } from "../api/aois";
@@ -16,14 +16,31 @@ import { useAoiStore } from "../store/aoiStore";
 import { useAuthStore } from "../store/authStore";
 import { useMapStore } from "../store/mapStore";
 
-// Observation, not engagement — nothing here reads as targeting (no
-// crosshairs, no lock-on, no red target boxes). One accent (cyan) for
-// chrome/selection; detections are neutral off-white, opacity = confidence.
+// Chrome/selection uses one cyan accent. AOIs stay neutral. Detections and
+// the change overlay, by explicit request, are the exception: activity the
+// operator needs to notice is flagged in an alerting palette — detections
+// pulse RED, the change footprint pulses ORANGE — rather than the old neutral
+// off-white. (This deliberately departs from the "no red boxes" default for
+// the two layers whose entire job is to surface things that changed.)
 const ACCENT_LINE: [number, number, number, number] = [63, 184, 212, 255];
 const ACCENT_FILL: [number, number, number, number] = [63, 184, 212, 36];
 const MUTED_LINE: [number, number, number, number] = [139, 148, 158, 160];
 const MUTED_FILL: [number, number, number, number] = [139, 148, 158, 18];
-const DETECTION_SELECTED_LINE: [number, number, number, number] = [95, 211, 238, 255];
+// Detection red (matches the --alert token used across the HUD chrome).
+const DETECTION_RED: [number, number, number] = [248, 81, 73];
+const DETECTION_SELECTED_LINE: [number, number, number, number] = [255, 138, 128, 255];
+
+// Pulse (not blink): the detection/change overlays breathe smoothly between a
+// bright and a dim level. A single requestAnimationFrame loop computes a
+// continuous cosine brightness (bright → dim → bright over PULSE_PERIOD_MS) and
+// both overlays read the same level, so they pulse in sync. Driving the level
+// ourselves (rather than a deck.gl/MapLibre transition) is deliberate: deck.gl
+// composite layers don't forward `transitions` to their sublayers, so that
+// route would silently degrade to a hard on/off blink. BRIGHT/DIM are fractions
+// of each layer's own opacity.
+const PULSE_PERIOD_MS = 1800;
+const PULSE_BRIGHT = 1;
+const PULSE_DIM = 0.38;
 
 const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection" as const, features: [] };
 
@@ -31,19 +48,31 @@ const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection" as const, features:
 // user zoomed all the way out (Z1, ~world span) and drew a 32-million-km²
 // AOI — whose imagery search matched millions of scenes and hung the UI.
 // A minimum zoom is the root-cause fix for that whole class of problem: it
-// caps how large an area can be framed (and therefore drawn) at once. Z5
-// spans very roughly ~1,500 km across at mid-latitudes — comfortably more
-// than enough to frame any AOI up to the backend's 50,000 km² cap
-// (apps/api/app/schemas/geo.py) with margin to spare, while making a
-// continent-scale draw physically impossible. It also keeps the map at or
-// above the true-color COG's own minzoom range in normal use, so imagery
-// is far more likely to actually be visible wherever you can draw.
-const MIN_ZOOM = 5;
+// caps how large an area can be framed (and therefore drawn) at once.
+//
+// Z10 ≈ 119 km view radius (~237 km across) at mid-latitude — chosen to
+// match the ~100 km footprint of a single Sentinel-2 granule, which is the
+// most imagery a single scene can fill anyway (beyond it, coverage is
+// patchy until the multi-scene mosaic exists). It comfortably frames any
+// realistic operational AOI while making a continent-scale draw physically
+// impossible, and sits well inside the true-color COG's usable range so
+// imagery is actually visible wherever you can draw. (An earlier value of
+// Z5 was shipped by mistake — it allowed a ~3,800 km radius, continental,
+// and did NOT prevent the overload trap it was meant to.)
+const MIN_ZOOM = 10;
 
 export function MapCanvas() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
+  // The tilejson URL each raster source was last built with. A MapLibre raster
+  // source's URL can't be mutated in place, so when the active scene/analysis
+  // changes (new URL) we must tear the source down and re-add it — otherwise
+  // the layer keeps serving the PREVIOUS AOI's imagery. This was the other half
+  // of "no imagery until I reload": selecting a new AOI updated the scene but
+  // the source kept its old URL, so nothing new ever loaded until a full reload
+  // wiped the map and rebuilt the source from scratch.
+  const rasterSourceUrls = useRef<Record<string, string>>({});
 
   const viewState = useMapStore((s) => s.viewState);
   const setViewState = useMapStore((s) => s.setViewState);
@@ -60,6 +89,7 @@ export function MapCanvas() {
 
   const activeRasterLayer = useAnalysisStore((s) => s.activeRasterLayer);
   const rasterOpacity = useAnalysisStore((s) => s.rasterOpacity);
+  const changeVisible = useAnalysisStore((s) => s.changeVisible);
   const detectionsVisible = useAnalysisStore((s) => s.detectionsVisible);
   const selectedScene = useAnalysisStore((s) => s.selectedScene);
   const activeAnalysisId = useAnalysisStore((s) => s.activeAnalysisId);
@@ -72,6 +102,38 @@ export function MapCanvas() {
   // so the raster effect below re-runs when the token arrives — see its
   // comment for the race this closes.
   const tilerToken = useAuthStore((s) => s.tilerToken);
+
+  // Shared pulse brightness (fraction of full opacity) for the detection/change
+  // overlays, driven by one rAF loop so the two breathe in sync. Quantized to
+  // ~2% steps so we only re-render when the level meaningfully moves (near the
+  // cosine's peaks it barely changes, so this idles most of the cycle).
+  // True while MapLibre is fetching raster tiles (pan, zoom, scene switch).
+  // Tile fetches don't go through react-query, so the global activity bar
+  // can't see them — this drives a small "loading imagery" chip so tiles
+  // arriving late still reads as "working", not a stuck/ghost view.
+  const [tilesLoading, setTilesLoading] = useState(false);
+
+  const [pulseLevel, setPulseLevel] = useState(PULSE_BRIGHT);
+  useEffect(() => {
+    const anyOverlay = detectionsVisible || changeVisible;
+    // Paused while drawing: the pulse re-runs the vector-layer effect, and
+    // there's no reason to churn the editable draw layer mid-draw.
+    if (!anyOverlay || isDrawing) {
+      setPulseLevel(PULSE_BRIGHT);
+      return;
+    }
+    let raf = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const phase = ((now - start) % PULSE_PERIOD_MS) / PULSE_PERIOD_MS;
+      const s = 0.5 + 0.5 * Math.cos(phase * 2 * Math.PI); // 1 at phase 0 → 0 at 0.5
+      const level = PULSE_DIM + (PULSE_BRIGHT - PULSE_DIM) * s;
+      setPulseLevel((prev) => (Math.abs(prev - level) >= 0.02 ? level : prev));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [detectionsVisible, changeVisible, isDrawing]);
 
   // Initialize the map + deck.gl overlay once.
   useEffect(() => {
@@ -144,6 +206,12 @@ export function MapCanvas() {
     });
     map.on("mouseout", () => setCursorLatLon(null));
 
+    // Tile-load feedback: "loading" the moment a source starts fetching,
+    // cleared on "idle" (MapLibre fires it once everything on screen has
+    // finished rendering with nothing left pending).
+    map.on("sourcedataloading", () => setTilesLoading(true));
+    map.on("idle", () => setTilesLoading(false));
+
     return () => {
       map.remove();
       mapRef.current = null;
@@ -157,11 +225,14 @@ export function MapCanvas() {
   // CommandBar-driven "jump to" requests.
   useEffect(() => {
     if (!flyToRequest || !mapRef.current) return;
-    mapRef.current.flyTo({
-      center: [flyToRequest.longitude, flyToRequest.latitude],
+    const target = {
+      center: [flyToRequest.longitude, flyToRequest.latitude] as [number, number],
       zoom: flyToRequest.zoom ?? mapRef.current.getZoom(),
-      essential: true,
-    });
+    };
+    // instant → jumpTo (no animation): used for the first auto-navigation so
+    // the user isn't staring at empty void during a multi-second globe fly.
+    if (flyToRequest.instant) mapRef.current.jumpTo(target);
+    else mapRef.current.flyTo({ ...target, essential: true });
     clearFlyToRequest();
   }, [flyToRequest, clearFlyToRequest]);
 
@@ -248,6 +319,10 @@ export function MapCanvas() {
       editHandlePointStrokeWidth: 1.5,
     });
 
+    // Detections: red, pulsing, outlined in the shape of each detection box.
+    // Alpha follows the shared pulse level (a smooth cosine breathe). The
+    // selected box holds a steady bright highlight.
+    const detectionAlpha = Math.round(255 * pulseLevel);
     const detectionsLayer = new GeoJsonLayer({
       id: "detections",
       data: {
@@ -262,13 +337,20 @@ export function MapCanvas() {
       },
       pickable: true,
       stroked: true,
-      filled: false,
-      getLineColor: (f: { properties: { id: string; score: number } }) =>
+      filled: true,
+      getLineColor: (f: { properties: { id: string } }) =>
         inspectorTarget?.kind === "detection" && inspectorTarget.id === f.properties.id
           ? DETECTION_SELECTED_LINE
-          : ([230, 237, 243, Math.round(f.properties.score * 255)] as [number, number, number, number]),
+          : ([...DETECTION_RED, detectionAlpha] as [number, number, number, number]),
+      // Faint red wash so the box still reads as a detection at the dim end of
+      // the pulse; the outline is what carries the shape.
+      getFillColor: [...DETECTION_RED, Math.round(detectionAlpha * 0.18)] as [number, number, number, number],
       lineWidthUnits: "pixels",
-      getLineWidth: 1.5,
+      getLineWidth: 2,
+      updateTriggers: {
+        getLineColor: [pulseLevel, inspectorTarget],
+        getFillColor: [pulseLevel],
+      },
       onClick: (info) => {
         const props = info.object?.properties as { id: string } | undefined;
         if (props) setInspectorTarget({ kind: "detection", id: props.id });
@@ -284,6 +366,7 @@ export function MapCanvas() {
     detections,
     detectionsVisible,
     inspectorTarget,
+    pulseLevel,
     setSelectedAoiId,
     setDraftGeometry,
     setInspectorTarget,
@@ -295,12 +378,26 @@ export function MapCanvas() {
     const map = mapRef.current;
     if (!map) return;
 
-    const syncRasterLayer = (id: string, url: string | null, visible: boolean, opacity: number) => {
+    const syncRasterLayer = (
+      id: string,
+      url: string | null,
+      visible: boolean,
+      opacity: number,
+      beforeId?: string,
+    ) => {
       const sourceId = `${id}-source`;
       if (!visible || !url) {
         if (map.getLayer(id)) map.removeLayer(id);
         if (map.getSource(sourceId)) map.removeSource(sourceId);
+        delete rasterSourceUrls.current[sourceId];
         return;
+      }
+      // The source exists but was built for a different scene/analysis (its URL
+      // changed) — tear it down so it's re-created below with the new URL.
+      if (map.getSource(sourceId) && rasterSourceUrls.current[sourceId] !== url) {
+        if (map.getLayer(id)) map.removeLayer(id);
+        map.removeSource(sourceId);
+        delete rasterSourceUrls.current[sourceId];
       }
       if (!map.getSource(sourceId)) {
         // minzoom is forced to the map's own floor, overriding whatever the
@@ -313,9 +410,24 @@ export function MapCanvas() {
         // NDVI's tilejson already reports minzoom 0, which is why it showed
         // and true-color didn't — this closes that asymmetry.
         map.addSource(sourceId, { type: "raster", url, tileSize: 256, minzoom: MIN_ZOOM });
+        rasterSourceUrls.current[sourceId] = url;
       }
       if (!map.getLayer(id)) {
-        map.addLayer({ id, type: "raster", source: sourceId, paint: { "raster-opacity": opacity } });
+        map.addLayer(
+          {
+            id,
+            type: "raster",
+            source: sourceId,
+            // fade-duration 0: tiles pop in the instant they arrive instead of
+            // cross-fading over ~300ms — makes panning feel markedly snappier
+            // (there's no basemap under them for a fade to smooth over anyway).
+            // No opacity transition: the change overlay's pulse is already
+            // smooth because the rAF loop feeds it a continuous level; a
+            // MapLibre transition on top would lag behind those updates.
+            paint: { "raster-opacity": opacity, "raster-fade-duration": 0 },
+          },
+          beforeId && map.getLayer(beforeId) ? beforeId : undefined,
+        );
       } else {
         map.setPaintProperty(id, "raster-opacity", opacity);
       }
@@ -338,14 +450,27 @@ export function MapCanvas() {
       // else working.
       const tilerReady = Boolean(tilerToken);
 
+      // Base imagery (mutually exclusive) is inserted BENEATH the change
+      // overlay so Change stacks on top of it — selecting Change no longer
+      // blanks the imagery; True Color / NDVI stays on underneath.
       syncRasterLayer(
         "true-color-layer",
         trueColorUrl,
         tilerReady && activeRasterLayer === "true_color",
         rasterOpacity.true_color,
+        "change-layer",
       );
-      syncRasterLayer("ndvi-layer", ndviUrl, tilerReady && activeRasterLayer === "ndvi", rasterOpacity.ndvi);
-      syncRasterLayer("change-layer", changeUrl, tilerReady && activeRasterLayer === "change", rasterOpacity.change);
+      syncRasterLayer(
+        "ndvi-layer",
+        ndviUrl,
+        tilerReady && activeRasterLayer === "ndvi",
+        rasterOpacity.ndvi,
+        "change-layer",
+      );
+      // Change is an independent overlay now (not part of the base radio),
+      // gated on its own visibility toggle. Its live opacity is driven by the
+      // pulse effect below, so we seed it here at the current pulse level.
+      syncRasterLayer("change-layer", changeUrl, tilerReady && changeVisible, rasterOpacity.change * pulseLevel);
     };
 
     if (map.isStyleLoaded()) {
@@ -353,7 +478,20 @@ export function MapCanvas() {
     } else {
       map.once("load", applyLayers);
     }
-  }, [selectedScene, activeAnalysis, activeRasterLayer, rasterOpacity, tilerToken]);
+    // pulseLevel is intentionally NOT a dep — re-adding sources every frame
+    // would be wasteful; the dedicated pulse effect below nudges only opacity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedScene, activeAnalysis, activeRasterLayer, changeVisible, rasterOpacity, tilerToken]);
+
+  // Drives the Change overlay's pulse by nudging only its raster-opacity — a
+  // cheap paint-property update (the layer's own opacity transition eases it),
+  // no source add/remove. Runs off the same shared pulse phase as the detection
+  // boxes so the two breathe together.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.getLayer("change-layer")) return;
+    map.setPaintProperty("change-layer", "raster-opacity", rasterOpacity.change * pulseLevel);
+  }, [pulseLevel, changeVisible, rasterOpacity, activeAnalysis]);
 
   return (
     <>
@@ -373,6 +511,12 @@ export function MapCanvas() {
               or draw a new one, to load real imagery here.
             </div>
           </div>
+        </div>
+      )}
+      {selectedScene && tilesLoading && (
+        <div className="map-loading-chip">
+          <span className="spinner" />
+          LOADING IMAGERY
         </div>
       )}
     </>

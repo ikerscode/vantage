@@ -49,7 +49,9 @@ export function AOIPanel() {
     setSelectedAoiId(first.id);
     setInspectorTarget({ kind: "aoi", id: first.id });
     const { longitude, latitude } = polygonCentroid(first.geometry);
-    requestFlyTo({ longitude, latitude, zoom: 12 });
+    // instant: this is the first paint — jump straight to the AOI rather than
+    // animating a multi-second fly across the empty void to get there.
+    requestFlyTo({ longitude, latitude, zoom: 12, instant: true });
   }, [aois, selectedAoiId, setSelectedAoiId, setInspectorTarget, requestFlyTo]);
 
   const handleSave = () => {
@@ -120,10 +122,21 @@ export function AOIPanel() {
             value={draftName}
             onChange={(e) => setDraftName(e.target.value)}
           />
-          <button className="tag" onClick={handleSave} disabled={createAoi.isPending}>
-            SAVE
+          <button
+            className={createAoi.isPending ? "tag btn-busy" : "tag"}
+            onClick={handleSave}
+            disabled={createAoi.isPending}
+          >
+            {createAoi.isPending ? (
+              <>
+                <span className="spinner" />
+                SAVING…
+              </>
+            ) : (
+              "SAVE"
+            )}
           </button>
-          <button className="tag" onClick={handleCancel}>
+          <button className="tag" onClick={handleCancel} disabled={createAoi.isPending}>
             CANCEL
           </button>
         </div>
@@ -167,12 +180,17 @@ export function AOIPanel() {
                 <button
                   className="icon-button"
                   title="Archive"
+                  disabled={archiveAoi.isPending}
                   onClick={(e) => {
                     e.stopPropagation();
                     archiveAoi.mutate(aoi.id);
                   }}
                 >
-                  ×
+                  {archiveAoi.isPending && archiveAoi.variables === aoi.id ? (
+                    <span className="spinner" />
+                  ) : (
+                    "×"
+                  )}
                 </button>
               </li>
             );

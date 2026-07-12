@@ -10,13 +10,18 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "@fontsource/ibm-plex-mono/600.css";
 
+import { ApiError } from "./api/client";
 import { App } from "./App";
 import { loadRuntimeConfig } from "./lib/runtimeConfig";
 import "./styles.css";
 import { pushErrorToast } from "./store/toastStore";
 
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : "request failed";
+function toastError(error: unknown): void {
+  if (error instanceof ApiError) {
+    pushErrorToast(error.message, error.code);
+  } else {
+    pushErrorToast(error instanceof Error ? error.message : "request failed");
+  }
 }
 
 // BRIEF v2, found for real: no mutation anywhere in this app surfaced its
@@ -30,13 +35,13 @@ const queryClient = new QueryClient({
   queryCache: new QueryCache({
     onError: (error, query) => {
       if (query.meta?.silent) return;
-      pushErrorToast(describeError(error));
+      toastError(error);
     },
   }),
   mutationCache: new MutationCache({
     onError: (error, _variables, _context, mutation) => {
       if (mutation.meta?.silent) return;
-      pushErrorToast(describeError(error));
+      toastError(error);
     },
   }),
 });

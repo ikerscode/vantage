@@ -31,6 +31,7 @@ export function ResultsFeed() {
   const activeAnalysisId = useAnalysisStore((s) => s.activeAnalysisId);
   const setInspectorTarget = useAnalysisStore((s) => s.setInspectorTarget);
   const setActiveAnalysisId = useAnalysisStore((s) => s.setActiveAnalysisId);
+  const setChangeVisible = useAnalysisStore((s) => s.setChangeVisible);
 
   const { data: aois } = useAois();
   const { data: activeAnalysis } = useAnalysis(activeAnalysisId ?? undefined);
@@ -114,6 +115,10 @@ export function ResultsFeed() {
       onClick: () => {
         setInspectorTarget({ kind: "analysis", id: analysis.id });
         setActiveAnalysisId(analysis.id);
+        // Clicking a change result should actually SHOW the change — the
+        // overlay is its own toggle now (decoupled from the base imagery), so
+        // turn it on rather than making the user hunt for the Change switch.
+        setChangeVisible(true);
         const aoi = aois?.find((a) => a.id === analysis.aoi_id);
         if (aoi) {
           setSelectedAoiId(aoi.id);

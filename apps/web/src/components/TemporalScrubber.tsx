@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useAnalyses, useCreateAnalysis } from "../api/analyses";
-import { useStacSearch } from "../api/stac";
+import { useStacScenes } from "../api/stac";
 import type { StacItemSummary } from "../api/types";
 import { useMonitorAlertStatus } from "../lib/monitorAlerts";
 import { useAnalysisStore } from "../store/analysisStore";
@@ -33,7 +33,6 @@ function tickPosition(sceneDate: string, from: string, to: string): number {
 export function TemporalScrubber() {
   const mode = useMapStore((s) => s.mode);
   const selectedAoiId = useAoiStore((s) => s.selectedAoiId);
-  const stacSearch = useStacSearch();
 
   // 24 months, not 3 (BRIEF v1.8, found for real on a fresh install): the
   // bundled demo scenes are ~several months to a year+ old by the time
@@ -57,6 +56,7 @@ export function TemporalScrubber() {
   const setDateB = useAnalysisStore((s) => s.setDateB);
   const setActiveAnalysisId = useAnalysisStore((s) => s.setActiveAnalysisId);
   const setInspectorTarget = useAnalysisStore((s) => s.setInspectorTarget);
+  const setChangeVisible = useAnalysisStore((s) => s.setChangeVisible);
 
   const createAnalysis = useCreateAnalysis();
   const { data: recentAnalyses } = useAnalyses(mode === "monitor" ? (selectedAoiId ?? undefined) : undefined);
@@ -70,11 +70,18 @@ export function TemporalScrubber() {
     else if (mode === "analyze") setScrubberMode("before-after");
   }, [mode, setScrubberMode]);
 
-  const scenes = stacSearch.data ?? [];
+  // Keyed by AOI + date range: fires automatically on AOI selection and on any
+  // date-range change, and — crucially — never carries another AOI's results
+  // over (see api/stac.ts's useStacScenes for the "no imagery until reload"
+  // bug this replaced). No manual auto-search effect needed anymore.
+  const scenesQuery = useStacScenes(
+    selectedAoiId ? { aoi_id: selectedAoiId, date_from: dateFrom, date_to: dateTo } : null,
+  );
+  const scenes = scenesQuery.data ?? [];
 
   const handleSearch = () => {
     if (!selectedAoiId) return;
-    stacSearch.mutate({ aoi_id: selectedAoiId, date_from: dateFrom, date_to: dateTo });
+    void scenesQuery.refetch();
   };
 
   const handleRunAnalysis = () => {
@@ -84,6 +91,9 @@ export function TemporalScrubber() {
       {
         onSuccess: (analysis) => {
           setActiveAnalysisId(analysis.id);
+          // Surface the change overlay so the result is visible the moment the
+          // job completes (it stacks on top of the base imagery, which stays on).
+          setChangeVisible(true);
           setInspectorTarget({ kind: "analysis", id: analysis.id });
         },
       },
@@ -102,28 +112,6 @@ export function TemporalScrubber() {
       setDateB(dateStr);
     }
   };
-
-  // BRIEF v1.8, found for real on a fresh install: selecting an AOI (even
-  // the auto-selected first one — see AOIPanel.tsx) never actually loaded
-  // any imagery on its own. SEARCH and picking a scene were both fully
-  // manual steps, so a real, working AOI with a real, completed analysis
-  // still showed nothing on the map until a user happened to click both —
-  // indistinguishable from a rendering bug (no basemap means "nothing
-  // selected yet" and "imagery failed" look identical: solid black).
-  // Auto-searches once per AOI selection, then auto-picks the most recent
-  // scene once results arrive, exactly what a manual SEARCH + click on
-  // the rightmost tick would have done — never overrides a user's own
-  // subsequent choice of scene.
-  const searchedForAoi = useRef<string | null>(null);
-  useEffect(() => {
-    if (!selectedAoiId || searchedForAoi.current === selectedAoiId) return;
-    searchedForAoi.current = selectedAoiId;
-    stacSearch.mutate({ aoi_id: selectedAoiId, date_from: dateFrom, date_to: dateTo });
-    // dateFrom/dateTo intentionally excluded — this should fire once per
-    // AOI selection, not on every date-range edit (that's what the
-    // SEARCH button is for).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAoiId]);
 
   // Populates singleDate (Explore) AND dateA/dateB (Analyze) together, from
   // whichever scenes exist, regardless of which scrubberMode is currently
@@ -205,8 +193,19 @@ export function TemporalScrubber() {
           <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
           <span className="status-value-tertiary">→</span>
           <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-          <button className="tag" onClick={handleSearch} disabled={!selectedAoiId || stacSearch.isPending}>
-            SEARCH
+          <button
+            className={scenesQuery.isFetching ? "tag btn-busy" : "tag"}
+            onClick={handleSearch}
+            disabled={!selectedAoiId || scenesQuery.isFetching}
+          >
+            {scenesQuery.isFetching ? (
+              <>
+                <span className="spinner" />
+                SEARCHING…
+              </>
+            ) : (
+              "SEARCH"
+            )}
           </button>
         </div>
         <div className="scrubber-mode-toggle">
@@ -293,8 +292,19 @@ export function TemporalScrubber() {
       </div>
 
       {mode === "analyze" && (
-        <button className="tag" onClick={handleRunAnalysis} disabled={!dateA || !dateB || createAnalysis.isPending}>
-          {createAnalysis.isPending ? "SUBMITTING…" : "RUN ANALYSIS"}
+        <button
+          className={createAnalysis.isPending ? "tag btn-busy" : "tag"}
+          onClick={handleRunAnalysis}
+          disabled={!dateA || !dateB || createAnalysis.isPending}
+        >
+          {createAnalysis.isPending ? (
+            <>
+              <span className="spinner" />
+              SUBMITTING…
+            </>
+          ) : (
+            "RUN ANALYSIS"
+          )}
         </button>
       )}
     </div>

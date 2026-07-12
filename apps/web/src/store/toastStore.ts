@@ -29,12 +29,16 @@ export const useToastStore = create<ToastState>((set) => ({
 
 /** BRIEF v2: every mutation/query failure in the app routes through this,
  * via main.tsx's QueryClient (MutationCache/QueryCache onError) — see that
- * file's comment. Nothing should ever fail completely silently again. */
-export function pushErrorToast(message: string): void {
+ * file's comment. Nothing should ever fail completely silently again.
+ *
+ * `code` (e.g. VG-401, VG-TIMEOUT) is surfaced in the toast title so a user
+ * can report precisely what failed instead of a generic "something went
+ * wrong" — see api/client.ts's ApiError.code. */
+export function pushErrorToast(message: string, code?: string): void {
   useToastStore.getState().pushToast({
     id: `error-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     kind: "error",
-    title: "Something went wrong",
+    title: code ? `Something went wrong · ${code}` : "Something went wrong",
     summary: message,
     time: new Date().toISOString().slice(11, 16).replace(":", "") + "Z",
   });

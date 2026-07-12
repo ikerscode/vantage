@@ -2,7 +2,14 @@ import { create } from "zustand";
 
 import type { StacItemSummary } from "../api/types";
 
+// Opacity is tracked for all three rasters, but only true_color/ndvi are
+// "base" layers (mutually exclusive, always exactly one on). Change is an
+// OVERLAY that stacks on top of whichever base is showing — see BaseRasterLayerId.
 export type RasterLayerId = "true_color" | "ndvi" | "change";
+// The base imagery layer. Exactly one is always active so real imagery stays
+// visible underneath the Change/Detections overlays (a live request: selecting
+// Change must NOT blank the map — the imagery has to stay on).
+export type BaseRasterLayerId = "true_color" | "ndvi";
 export type ScrubberMode = "single" | "before-after";
 
 export type InspectorTarget = {
@@ -26,13 +33,17 @@ interface AnalysisState {
   setSelectedScene: (scene: StacItemSummary | null) => void;
   activeAnalysisId: string | null;
   setActiveAnalysisId: (id: string | null) => void;
-  // Raster layers (True Color / NDVI / Change) are mutually exclusive — only
-  // one can be on the map at a time. Detections is an independent vector
-  // toggle that stacks with whichever raster (or none) is active.
-  activeRasterLayer: RasterLayerId | null;
-  setActiveRasterLayer: (layer: RasterLayerId | null) => void;
+  // Base imagery (True Color / NDVI) is mutually exclusive — exactly one is
+  // always on, so imagery never disappears out from under the overlays.
+  // Change and Detections are independent overlays that STACK on top of it.
+  activeRasterLayer: BaseRasterLayerId;
+  setActiveRasterLayer: (layer: BaseRasterLayerId) => void;
   rasterOpacity: Record<RasterLayerId, number>;
   setRasterOpacity: (layer: RasterLayerId, opacity: number) => void;
+  // Change overlay — the colorized NDVI-diff raster from the active analysis.
+  changeVisible: boolean;
+  toggleChangeVisible: () => void;
+  setChangeVisible: (visible: boolean) => void;
   detectionsVisible: boolean;
   toggleDetectionsVisible: () => void;
   inspectorTarget: InspectorTarget;
@@ -52,12 +63,16 @@ export const useAnalysisStore = create<AnalysisState>((set) => ({
   setSelectedScene: (selectedScene) => set({ selectedScene }),
   activeAnalysisId: null,
   setActiveAnalysisId: (activeAnalysisId) => set({ activeAnalysisId }),
+  // Selecting a base layer always switches to it (never toggles off) — one
+  // base is always active so the map is never left blank while an overlay is on.
   activeRasterLayer: "true_color",
-  setActiveRasterLayer: (layer) =>
-    set((state) => ({ activeRasterLayer: state.activeRasterLayer === layer ? null : layer })),
-  rasterOpacity: { true_color: 1, ndvi: 0.8, change: 0.65 },
+  setActiveRasterLayer: (layer) => set({ activeRasterLayer: layer }),
+  rasterOpacity: { true_color: 1, ndvi: 0.8, change: 0.75 },
   setRasterOpacity: (layer, opacity) =>
     set((state) => ({ rasterOpacity: { ...state.rasterOpacity, [layer]: opacity } })),
+  changeVisible: false,
+  toggleChangeVisible: () => set((state) => ({ changeVisible: !state.changeVisible })),
+  setChangeVisible: (changeVisible) => set({ changeVisible }),
   detectionsVisible: false,
   toggleDetectionsVisible: () => set((state) => ({ detectionsVisible: !state.detectionsVisible })),
   inspectorTarget: null,

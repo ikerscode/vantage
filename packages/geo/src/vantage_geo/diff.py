@@ -1,8 +1,14 @@
 import numpy as np
 
-# RGBA colors used to colorize the change map: vegetation loss (red), vegetation gain (green).
-LOSS_COLOR = (220, 50, 47, 255)
-GAIN_COLOR = (38, 166, 91, 255)
+# RGBA colors used to colorize the change map. Both directions of change are
+# now rendered in the ORANGE family (a live request: mark changes in orange),
+# keeping a slight hue split so loss vs. gain is still distinguishable at a
+# glance — deep burnt-orange for vegetation loss, warm amber for gain. The
+# frontend overlays this on top of the base imagery and blinks it (see
+# apps/web MapCanvas.tsx). Only affects analyses colorized AFTER this change;
+# COGs already written keep their previous colors.
+LOSS_COLOR = (230, 96, 24, 255)
+GAIN_COLOR = (245, 176, 66, 255)
 TRANSPARENT = (0, 0, 0, 0)
 
 

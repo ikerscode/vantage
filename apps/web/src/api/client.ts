@@ -6,11 +6,18 @@ export function getApiBaseUrl(): string {
 }
 
 export class ApiError extends Error {
+  // Short, stable code shown in the error toast so a user can report exactly
+  // what failed: VG-<httpStatus> for a server response (e.g. VG-401, VG-500),
+  // VG-TIMEOUT when the request exceeded REQUEST_TIMEOUT_MS, VG-NET for a
+  // network/CORS failure with no response at all.
+  readonly code: string;
   constructor(
     public status: number,
     message: string,
+    code?: string,
   ) {
     super(message);
+    this.code = code ?? (status > 0 ? `VG-${status}` : "VG-NET");
   }
 }
 
@@ -41,7 +48,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     });
   } catch (err) {
     if (err instanceof DOMException && err.name === "TimeoutError") {
-      throw new ApiError(0, `request to ${path} timed out after ${REQUEST_TIMEOUT_MS / 1000}s`);
+      throw new ApiError(0, `request to ${path} timed out after ${REQUEST_TIMEOUT_MS / 1000}s`, "VG-TIMEOUT");
     }
     throw err;
   }

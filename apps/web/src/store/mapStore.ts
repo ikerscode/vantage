@@ -25,9 +25,11 @@ interface MapState {
   cursorLatLon: LatLon | null;
   setCursorLatLon: (pos: LatLon | null) => void;
   // Set imperatively by CommandBar to ask MapCanvas to fly somewhere; cleared
-  // once consumed so repeated jumps to the same place still fire.
-  flyToRequest: { longitude: number; latitude: number; zoom?: number } | null;
-  requestFlyTo: (target: { longitude: number; latitude: number; zoom?: number }) => void;
+  // once consumed so repeated jumps to the same place still fire. `instant`
+  // jumps with no animation (used for the first auto-navigation so the user
+  // doesn't watch a multi-second fly across the empty void before imagery).
+  flyToRequest: { longitude: number; latitude: number; zoom?: number; instant?: boolean } | null;
+  requestFlyTo: (target: { longitude: number; latitude: number; zoom?: number; instant?: boolean }) => void;
   clearFlyToRequest: () => void;
 }
 
@@ -37,7 +39,7 @@ export const useMapStore = create<MapState>((set) => ({
   // Opens at a regional zoom, not world scale — see MapCanvas's MIN_ZOOM
   // (the map also enforces that as a hard floor). A fresh install with no
   // AOIs yet still lands somewhere you could immediately draw a usable one.
-  viewState: { longitude: 0, latitude: 20, zoom: 5, pitch: 0, bearing: 0 },
+  viewState: { longitude: 0, latitude: 20, zoom: 10, pitch: 0, bearing: 0 },
   setViewState: (viewState) => set({ viewState }),
   cursorLatLon: null,
   setCursorLatLon: (cursorLatLon) => set({ cursorLatLon }),

@@ -50,8 +50,17 @@
 
   /* Motion */
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --dur-fast: 120ms;
   --dur-panel: 180ms;
+  --dur-press: 90ms;
+
+  /* Focus ring — keyboard/interaction affordance, one consistent treatment */
+  --focus-ring: 0 0 0 1px var(--bg-void), 0 0 0 3px rgba(63, 184, 212, 0.55);
+  /* Primary-action fill — a restrained accent gradient for the buttons that
+     actually commit something (Save / Run / Save-as-Monitor) */
+  --accent-fill: linear-gradient(180deg, rgba(63, 184, 212, 0.22), rgba(63, 184, 212, 0.1));
+  --accent-fill-hover: linear-gradient(180deg, rgba(95, 211, 238, 0.32), rgba(63, 184, 212, 0.16));
 }
 
 * {
@@ -125,6 +134,47 @@ button {
     transform: translateX(320%);
   }
 }
+@keyframes vg-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Global activity bar — a slim indeterminate sweep that rides the top edge
+   whenever any request is in flight. The classic "we heard you, it's working"
+   signal so nothing ever feels like a dead/ghost button. */
+@keyframes vg-activity {
+  0% {
+    left: -35%;
+    width: 35%;
+  }
+  50% {
+    width: 45%;
+  }
+  100% {
+    left: 100%;
+    width: 35%;
+  }
+}
+@keyframes vg-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes vg-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
 
 /* ============================================================
    Layout — full-bleed map, chrome floats over it
@@ -178,6 +228,31 @@ button {
   line-height: 1.5;
 }
 
+/* Small "loading imagery" chip — bottom-center, above the timeline. Signals
+   that tiles are on the way (tile fetches bypass react-query's activity bar). */
+.map-loading-chip {
+  position: absolute;
+  bottom: 92px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--accent-bright);
+  background: var(--panel);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  box-shadow: var(--seat);
+  pointer-events: none;
+  animation: vg-fade-up var(--dur-fast) var(--ease-out) both;
+}
+
 .hud-overlay > * {
   pointer-events: auto;
 }
@@ -225,8 +300,20 @@ button {
   -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-panel);
-  box-shadow: var(--seat);
+  /* seat + a hairline top highlight for a subtle machined-glass edge */
+  box-shadow: var(--seat), inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
   overflow: hidden;
+  animation: vg-fade-up var(--dur-panel) var(--ease-out) both;
+}
+
+/* Respect reduced-motion: kill entrance/pulse animation for anyone who asks. */
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    animation: none;
+  }
+  * {
+    scroll-behavior: auto;
+  }
 }
 
 .panel-header {
@@ -289,7 +376,13 @@ button {
 }
 
 .row:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* A hovered row reveals a faint accent edge — a small "this is selectable"
+   affordance that reads before the click. */
+.row:hover .row-bar {
+  background: var(--hairline-strong);
 }
 
 .row-bar {
@@ -299,6 +392,7 @@ button {
   bottom: 0;
   width: 2px;
   background: transparent;
+  transition: background var(--dur-fast) var(--ease-out);
 }
 
 /* small bordered buttons reused across panels (tags, presets, icon buttons) */
@@ -347,6 +441,127 @@ button {
 .text-input:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+/* ============================================================
+   Interaction feedback — press / hover / focus / loading.
+   One consistent language so no control ever feels like a
+   ghost button: everything acknowledges the pointer.
+   ============================================================ */
+
+/* Every interactive control eases the properties that change on
+   hover/press, and shows a clear pressed state + keyboard focus ring. */
+.tag,
+.icon-button,
+.aoi-draw-button,
+.aoi-save-monitor-btn,
+.mode-switcher-segment,
+.scrubber-mode-toggle button,
+.switch,
+.row {
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+
+/* Pressed: a small, tactile depress. Excludes disabled controls. */
+.tag:active:not(:disabled),
+.icon-button:active:not(:disabled),
+.aoi-draw-button:active:not(:disabled),
+.aoi-save-monitor-btn:active:not(:disabled),
+.mode-switcher-segment:active:not(:disabled),
+.scrubber-mode-toggle button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Keyboard focus ring (pointer clicks don't trigger :focus-visible). */
+.tag:focus-visible,
+.icon-button:focus-visible,
+.aoi-draw-button:focus-visible,
+.aoi-save-monitor-btn:focus-visible,
+.mode-switcher-segment:focus-visible,
+.scrubber-mode-toggle button:focus-visible,
+.switch:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Missing hover affordances filled in — every button now lifts on hover. */
+.aoi-draw-button:hover:not(.active),
+.icon-button:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.mode-switcher-segment:hover:not(.active),
+.scrubber-mode-toggle button:hover:not(.active) {
+  color: var(--text-primary);
+  background: rgba(139, 148, 158, 0.08);
+}
+.aoi-save-monitor-btn:not(:disabled):hover {
+  background: var(--accent-fill-hover);
+  box-shadow: var(--glow-accent);
+}
+
+/* Disabled: consistent, unmistakable, and never shows a pressable cursor. */
+.tag:disabled,
+.aoi-draw-button:disabled,
+.mode-switcher-segment:disabled,
+.scrubber-mode-toggle button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Inline spinner — used inside buttons mid-request and anywhere a small
+   "working" mark is needed. Sizes to the surrounding text. */
+.spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: vg-spin 0.7s linear infinite;
+  vertical-align: -1px;
+  opacity: 0.85;
+}
+
+/* A button showing a spinner keeps its label but dims it slightly and holds
+   a steady inset so the press already reads as "accepted, in progress". */
+.btn-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent-bright);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* ============================================================
+   Global activity bar — top-edge in-flight indicator
+   ============================================================ */
+.activity-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 40;
+}
+.activity-bar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 35%;
+  background: linear-gradient(90deg, transparent, var(--accent-bright), transparent);
+  box-shadow: 0 0 8px rgba(95, 211, 238, 0.6);
+  animation: vg-activity 1.15s var(--ease-out) infinite;
 }
 
 /* ============================================================
@@ -707,7 +922,7 @@ button {
   align-items: center;
   justify-content: space-between;
   border: 1px solid var(--accent);
-  background: var(--accent-dim);
+  background: var(--accent-fill);
   border-radius: var(--radius-control);
   padding: 7px 10px;
   color: var(--accent-bright);
@@ -815,6 +1030,28 @@ button {
   border-radius: 2px;
   padding: 1px 3px;
   flex: none;
+}
+
+/* Change = orange, Detections = red — matching how the two overlays are
+   rendered on the map (pulsing orange footprint / pulsing red boxes). */
+.layer-tag.warn {
+  color: #f0a35e;
+  border-color: rgba(240, 163, 94, 0.42);
+}
+
+.layer-tag.alert {
+  color: var(--alert);
+  border-color: rgba(248, 81, 73, 0.42);
+}
+
+/* Honest-seam note under the Detections toggle — the bundled detector is a
+   generic placeholder, not an overhead-imagery model (CLAUDE.md §3). */
+.layer-note {
+  padding: 7px 13px 9px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+  border-top: 1px solid var(--hairline);
 }
 
 .layer-opacity-track {
@@ -1439,6 +1676,8 @@ button {
   gap: 10px;
   align-items: flex-start;
   z-index: 6;
+  transition: top var(--dur-panel) var(--ease-out);
+  animation: vg-toast-in var(--dur-panel) var(--ease-spring) both;
 }
 
 .toast-dot {

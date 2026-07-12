@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { useDevAuthBootstrap } from "./api/auth";
 import { AOIPanel } from "./components/AOIPanel";
 import { CommandBar } from "./components/CommandBar";
+import { GlobalActivityBar } from "./components/GlobalActivityBar";
 import { Inspector } from "./components/Inspector";
 import { LayersControl } from "./components/LayersControl";
 import { MapCanvas } from "./components/MapCanvas";
@@ -33,6 +34,7 @@ export function App() {
   return (
     <div className="hud-shell">
       <MapCanvas />
+      <GlobalActivityBar />
       <div className="hud-overlay">
         <div className="hud-statusstrip">
           <StatusStrip />
