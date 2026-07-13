@@ -1,6 +1,6 @@
 [package]
 name = "vantage-launcher"
-version = "0.1.0"
+version = "2.0.0"
 edition = "2021"
 description = "VANTAGE desktop launcher: brings up the packaged container stack, health-gates the splash screen, and serves the bundled mission-console UI. See ../launcher-core for the testable orchestration logic this binary is a thin GUI shell around."
 

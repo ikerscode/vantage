@@ -35,7 +35,7 @@ If you're not sure, you almost certainly want the **thin install** — just down
 ### Linux — `.deb`
 
 ```bash
-sudo dpkg -i vantage_1.0.0_amd64.deb
+sudo dpkg -i vantage_2.0.0_amd64.deb
 ```
 
 If you don't already have a container runtime: `sudo apt install podman podman-compose` (found for real on a user's machine, BRIEF v1.8: `podman` alone isn't enough — the launcher also needs a compose provider, either Podman's own `compose` subcommand or the standalone `podman-compose`, and a plain `apt install podman` doesn't pull either one in automatically on Ubuntu). Or install Docker per Docker's own instructions — the launcher works with either.
@@ -43,8 +43,8 @@ If you don't already have a container runtime: `sudo apt install podman podman-c
 ### Linux — `.AppImage` (portable, no install step)
 
 ```bash
-chmod +x VANTAGE_1.0.0_amd64.AppImage
-./VANTAGE_1.0.0_amd64.AppImage
+chmod +x VANTAGE_2.0.0_amd64.AppImage
+./VANTAGE_2.0.0_amd64.AppImage
 ```
 
 ### macOS — `.dmg`
@@ -107,7 +107,7 @@ npm run build   # -> src-tauri/target/release/bundle/{deb,appimage,msi,dmg}/...
 cd ../..
 
 # 3. Build + tag the container images.
-VANTAGE_VERSION=1.0.0 ./scripts/package/build-images.sh
+VANTAGE_VERSION=2.0.0 ./scripts/package/build-images.sh
 
 # 4. Push them to GHCR — this is what makes the THIN install work: a
 #    normal install pulls these automatically on first launch, no bundle
@@ -115,8 +115,8 @@ VANTAGE_VERSION=1.0.0 ./scripts/package/build-images.sh
 #    an anonymous pull: GHCR packages default to private regardless of
 #    repo visibility — see PACKAGING_V2_REPORT.md.)
 for img in vantage-api vantage-tiler vantage-inference vantage-pgstac-migrate; do
-  docker tag "$img:1.0.0" "ghcr.io/ikerscode/$img:1.0.0"
-  docker push "ghcr.io/ikerscode/$img:1.0.0"
+  docker tag "$img:2.0.0" "ghcr.io/ikerscode/$img:2.0.0"
+  docker push "ghcr.io/ikerscode/$img:2.0.0"
 done
 
 # 5. Bundle the same images for the AIR-GAP install path. NOT added to
@@ -124,9 +124,9 @@ done
 #    (down from 6.6 GiB — see PACKAGING_V2_REPORT.md), still over
 #    GitHub's per-file release-asset cap, so it ships as separate chunked
 #    downloads next to the installer, not embedded inside it.
-VANTAGE_VERSION=1.0.0 ./scripts/package/save-images.sh
-VANTAGE_VERSION=1.0.0 ./scripts/package/split-images.sh
-# -> writes infra/vantage-images-1.0.0.tar.part-* + a .sha256 file.
+VANTAGE_VERSION=2.0.0 ./scripts/package/save-images.sh
+VANTAGE_VERSION=2.0.0 ./scripts/package/split-images.sh
+# -> writes infra/vantage-images-2.0.0.tar.part-* + a .sha256 file.
 #    Distribute the installer from step 2 on its own for the thin path,
 #    or the installer AND every .tar.part-*/.sha256 file together for the
 #    air-gap path (see docs/AIRGAP.md for what the end user does with them).

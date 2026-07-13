@@ -17,7 +17,7 @@ _docs_kwargs = (
     if settings.vantage_env == "production"
     else {}
 )
-app = FastAPI(title="VANTAGE API", version="0.1.0", **_docs_kwargs)
+app = FastAPI(title="VANTAGE API", version="2.0.0", **_docs_kwargs)
 
 # BRIEF v2 (SECURITY_FIXES_REPORT.md's one explicitly-flagged remaining
 # gap): see app/core/limiter.py for what this does and doesn't buy in a
