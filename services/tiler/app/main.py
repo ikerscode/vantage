@@ -4,10 +4,25 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from rio_tiler.io import STACReader
 from titiler.core.factory import MultiBaseTilerFactory, TilerFactory
+from titiler.core.middleware import CacheControlMiddleware
 
 from app.security import require_tiler_token, validated_url
 
 app = FastAPI(title="VANTAGE Tiler")
+
+# PERF: found for real — tile/tilejson responses carried no Cache-Control at
+# all, so panning back over an already-seen area re-fetched and re-rendered
+# every tile from scratch instead of the browser serving it from its own
+# cache. Every tile/tilejson response here is genuinely immutable for its
+# exact URL: the `url` query param pins an exact dated STAC asset or an exact
+# completed analysis's S3 key, and neither ever changes in place — so a long
+# max-age is safe, not just fast. /health is excluded on principle (a health
+# check should always hit the process live, not a cache).
+app.add_middleware(
+    CacheControlMiddleware,
+    cachecontrol=os.environ.get("TILER_CACHE_CONTROL", "public, max-age=86400"),
+    exclude_path={r"/health"},
+)
 
 # SEC-01: default-deny, not default-allow. Earlier versions of this file
 # fell back to "*" when CORS_ALLOWED_ORIGINS was unset — meaning ANY origin

@@ -1,6 +1,6 @@
 import { DrawPolygonMode, EditableGeoJsonLayer, ViewMode } from "@deck.gl-community/editable-layers";
 import { MapboxOverlay } from "@deck.gl/mapbox";
-import { GeoJsonLayer } from "deck.gl";
+import { GeoJsonLayer, type Layer } from "deck.gl";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
@@ -31,16 +31,22 @@ const DETECTION_RED: [number, number, number] = [248, 81, 73];
 const DETECTION_SELECTED_LINE: [number, number, number, number] = [255, 138, 128, 255];
 
 // Pulse (not blink): the detection/change overlays breathe smoothly between a
-// bright and a dim level. A single requestAnimationFrame loop computes a
-// continuous cosine brightness (bright → dim → bright over PULSE_PERIOD_MS) and
-// both overlays read the same level, so they pulse in sync. Driving the level
-// ourselves (rather than a deck.gl/MapLibre transition) is deliberate: deck.gl
-// composite layers don't forward `transitions` to their sublayers, so that
-// route would silently degrade to a hard on/off blink. BRIGHT/DIM are fractions
-// of each layer's own opacity.
+// bright and a dim level, both reading the same shared level so they stay in
+// sync. Driving the level ourselves (rather than a deck.gl/MapLibre transition)
+// is deliberate: deck.gl composite layers don't forward `transitions` to their
+// sublayers, so that route would silently degrade to a hard on/off blink.
+// BRIGHT/DIM are fractions of each layer's own opacity.
 const PULSE_PERIOD_MS = 1800;
 const PULSE_BRIGHT = 1;
 const PULSE_DIM = 0.38;
+// PERF: sampled on a fixed interval, not requestAnimationFrame — found for
+// real that near the steepest part of the cosine, rAF's ~60fps sampling was
+// pushing a new pulseLevel (and therefore a full deck.gl/MapLibre repaint)
+// on nearly every frame. A slow ambient breathe over ~2s doesn't need 60
+// updates/sec to look smooth; ~12/sec (every 80ms) is visually identical
+// while cutting forced repaints during any pulse-active state by ~5x — a
+// direct fix for "the whole app feels laggy while Detections/Change is on".
+const PULSE_TICK_MS = 80;
 
 const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection" as const, features: [] };
 
@@ -127,6 +133,19 @@ export function MapCanvas() {
   // the source kept its old URL, so nothing new ever loaded until a full reload
   // wiped the map and rebuilt the source from scratch.
   const rasterSourceUrls = useRef<Record<string, string>>({});
+  // PERF: the saved-AOI/draw layers and the detections layer are built by two
+  // SEPARATE effects below (so a pulse tick — up to ~12x/sec, see
+  // PULSE_TICK_MS — only ever rebuilds the detections layer, not the AOI/draw
+  // layers too), but deck.gl's overlay still needs one combined `layers`
+  // array each time either effect updates. These refs hold each effect's
+  // latest output so either one can recompose the full array from both,
+  // without re-running or re-reading the other's logic. Found for real:
+  // before this split, every pulse tick rebuilt all three vector layers and
+  // forced a full deck.gl/MapLibre repaint for layers whose data hadn't
+  // changed at all — a real, measurable contributor to "the app feels laggy"
+  // while Detections or Change is on.
+  const staticVectorLayersRef = useRef<Layer[]>([]);
+  const detectionsLayerRef = useRef<Layer | null>(null);
 
   const viewState = useMapStore((s) => s.viewState);
   const setViewState = useMapStore((s) => s.setViewState);
@@ -171,23 +190,21 @@ export function MapCanvas() {
   const [pulseLevel, setPulseLevel] = useState(PULSE_BRIGHT);
   useEffect(() => {
     const anyOverlay = detectionsVisible || changeVisible;
-    // Paused while drawing: the pulse re-runs the vector-layer effect, and
-    // there's no reason to churn the editable draw layer mid-draw.
+    // Paused while drawing: a pulse tick re-runs the detections-layer effect,
+    // and there's no reason to churn anything mid-draw.
     if (!anyOverlay || isDrawing) {
       setPulseLevel(PULSE_BRIGHT);
       return;
     }
-    let raf = 0;
     const start = performance.now();
-    const tick = (now: number) => {
-      const phase = ((now - start) % PULSE_PERIOD_MS) / PULSE_PERIOD_MS;
+    const computeLevel = () => {
+      const phase = ((performance.now() - start) % PULSE_PERIOD_MS) / PULSE_PERIOD_MS;
       const s = 0.5 + 0.5 * Math.cos(phase * 2 * Math.PI); // 1 at phase 0 → 0 at 0.5
-      const level = PULSE_DIM + (PULSE_BRIGHT - PULSE_DIM) * s;
-      setPulseLevel((prev) => (Math.abs(prev - level) >= 0.02 ? level : prev));
-      raf = requestAnimationFrame(tick);
+      return PULSE_DIM + (PULSE_BRIGHT - PULSE_DIM) * s;
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    setPulseLevel(computeLevel());
+    const interval = window.setInterval(() => setPulseLevel(computeLevel()), PULSE_TICK_MS);
+    return () => window.clearInterval(interval);
   }, [detectionsVisible, changeVisible, isDrawing]);
 
   // Initialize the map + deck.gl overlay once.
@@ -346,8 +363,10 @@ export function MapCanvas() {
     }
   }, [isDrawing]);
 
-  // Vector layers: saved AOIs, the in-progress AOI draw layer, detection boxes.
-  // (The graticule is a native MapLibre layer, not here — see its own effect.)
+  // Saved AOIs + the in-progress AOI draw layer. Split out from the
+  // detections layer below (PERF — see staticVectorLayersRef's comment):
+  // these two only change on real AOI/draw edits, never on a pulse tick, so
+  // they're cached in a ref and recomposed rather than rebuilt every ~80ms.
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
@@ -407,7 +426,21 @@ export function MapCanvas() {
       editHandlePointStrokeWidth: 1.5,
     });
 
-    // Detections: red, pulsing, outlined in the shape of each detection box.
+    staticVectorLayersRef.current = [savedAoisLayer, drawLayer];
+    overlay.setProps({
+      layers: detectionsLayerRef.current
+        ? [...staticVectorLayersRef.current, detectionsLayerRef.current]
+        : staticVectorLayersRef.current,
+    });
+  }, [aois, selectedAoiId, draftGeometry, isDrawing, setSelectedAoiId, setDraftGeometry, setInspectorTarget]);
+
+  // Detections: red, pulsing, outlined in the shape of each detection box.
+  // Isolated from the effect above so a pulse tick (~12x/sec while visible)
+  // only ever rebuilds THIS layer, not the AOI/draw layers too.
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+
     // Alpha follows the shared pulse level (a smooth cosine breathe). The
     // selected box holds a steady bright highlight.
     const detectionAlpha = Math.round(255 * pulseLevel);
@@ -445,20 +478,9 @@ export function MapCanvas() {
       },
     });
 
-    overlay.setProps({ layers: [savedAoisLayer, drawLayer, detectionsLayer] });
-  }, [
-    aois,
-    selectedAoiId,
-    draftGeometry,
-    isDrawing,
-    detections,
-    detectionsVisible,
-    inspectorTarget,
-    pulseLevel,
-    setSelectedAoiId,
-    setDraftGeometry,
-    setInspectorTarget,
-  ]);
+    detectionsLayerRef.current = detectionsLayer;
+    overlay.setProps({ layers: [...staticVectorLayersRef.current, detectionsLayer] });
+  }, [detections, detectionsVisible, inspectorTarget, pulseLevel, setInspectorTarget]);
 
   // Raster imagery: whichever single raster layer is active (mutually
   // exclusive — see LayersControl) at its own configured opacity.

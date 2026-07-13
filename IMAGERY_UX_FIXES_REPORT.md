@@ -220,3 +220,56 @@ those as load-bearing "prove-it" evidence, so removing them would destroy
 traceability, not reduce bloat. No orphaned source files found.
 
 New files: `components/BootSequence.tsx`, `components/Compass.tsx`, `lib/mgrs.ts`.
+
+---
+
+## 9. Performance pass — tile-loading latency and UI jank
+
+Reported: imagery "takes too long in certain places" and the app feels
+"laggy." Traced to two independent, concrete causes (not guessed at) — one
+per axis.
+
+**Why tiles were slow in bursts (backend, `services/tiler`).**
+`validated_url`'s SSRF gate does a real `socket.getaddrinfo()` DNS resolution
+on *every single tile request*, with zero caching (deliberate, at the time —
+each request must independently confirm the host hasn't been DNS-rebound to
+a private/metadata address). A single viewport pan fires dozens of tile
+requests in a burst, nearly all to the same 1-2 allowlisted hostnames — each
+one was paying a full synchronous DNS round-trip that had just been paid
+milliseconds earlier. Fixed with a short-TTL (30s default, `TILER_DNS_CACHE_
+TTL_SECONDS` to tune/disable) in-process cache: collapses a whole burst to
+one real lookup per hostname, while still catching a genuine rebinding within
+one TTL window — a bounded, honest tradeoff, not a security regression (a
+cached *rejection* still rejects; verified by a dedicated test). Separately,
+tile/tilejson responses carried **no `Cache-Control` header at all**, so
+revisiting an already-seen area re-fetched and re-rendered every tile from
+network instead of the browser serving it from its own cache — added via
+titiler's own `CacheControlMiddleware` (`public, max-age=86400`, since a
+tile's exact URL — a dated STAC asset or a completed analysis's S3 key —
+never changes in place; `/health` excluded on principle). Both changes have
+new regression tests (`services/tiler/tests/test_security.py`); full suite
+(17) passes.
+
+**Why the UI felt laggy (frontend, `MapCanvas.tsx`).** The detection/change
+pulse was driven by `requestAnimationFrame`, sampling a cosine at up to ~60
+frames/sec — near the steepest part of the curve this pushed a new
+`pulseLevel` (and therefore a full deck.gl + MapLibre repaint) on nearly
+every frame. A slow ~2s ambient breathe doesn't need 60 updates/sec to read
+as smooth; switched to a fixed 80ms interval (~12/sec) sampling the same
+cosine formula against real elapsed time — visually identical, ~5x fewer
+forced repaints while Detections or Change is on. Separately, the vector-
+layers effect reconstructed **all three** deck.gl layers (saved AOIs, the
+editable draw layer, detections) on every one of those ticks, even though
+only the detections layer's color was changing — split into two effects
+(AOI/draw layers cached in a ref, recomposed rather than rebuilt by the
+detections effect) so a pulse tick now only touches the layer that actually
+changed.
+
+Verification: `tsc -b` + `vite build` clean; tiler/geo/api suites (17/14/36)
+pass; weapons-boundary gate green. **Not independently verified**: I did not
+drive this in a browser with a profiler attached to measure the before/after
+frame-time delta directly — the fixes are traced to specific, provable causes
+in the code (an uncached synchronous DNS call in a hot path; an animation
+loop sampling far faster than visually necessary while over-rebuilding
+unrelated layers), not inferred from a benchmark. Worth a real profiler pass
+if the improvement isn't clearly felt.

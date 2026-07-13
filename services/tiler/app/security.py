@@ -43,11 +43,29 @@ import hmac
 import ipaddress
 import os
 import socket
+import time
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlparse
 
 from fastapi import Header, HTTPException, Query
+
+# PERF: found for real profiling "why does panning feel slow" — every tile
+# request was doing a synchronous socket.getaddrinfo() with zero caching, on
+# the hot path, for hostnames that are almost always the same 1-2 allowlisted
+# imagery sources. A single viewport pan can fire dozens of tile requests in
+# a burst; each one re-did a full DNS round-trip for a hostname it had just
+# resolved milliseconds earlier. A short-TTL in-process cache keeps the
+# DNS-rebinding defense genuinely intact (a rebound IP is still caught, and
+# re-resolution still happens well within any real attack window) while
+# collapsing that whole burst down to one real lookup per hostname per TTL
+# window. TTL is deliberately short — this trades a small, bounded amount of
+# rebinding-detection latency for a large cut in the common case's redundant
+# lookups, not a cache that could hide a rebinding attack indefinitely.
+# TILER_DNS_CACHE_TTL_SECONDS=0 disables caching entirely (always resolve
+# fresh) for anyone who wants the stricter original behavior.
+_DNS_CACHE_TTL_S = float(os.environ.get("TILER_DNS_CACHE_TTL_SECONDS", "30"))
+_dns_cache: dict[str, tuple[float, list]] = {}
 
 _DISALLOWED_IP_PREDICATES = (
     "is_private",
@@ -75,9 +93,24 @@ def _static_catalog_mount_path() -> str:
     return os.environ.get("STATIC_CATALOG_MOUNT_PATH", "/data/demo")
 
 
+def _resolve_cached(hostname: str) -> list:
+    """socket.getaddrinfo(hostname, None), cached for _DNS_CACHE_TTL_S seconds
+    per hostname — see the module-level comment on _dns_cache for why a short
+    TTL here is a deliberate, bounded tradeoff and not a security regression."""
+    now = time.monotonic()
+    cached = _dns_cache.get(hostname)
+    if cached is not None and cached[0] > now:
+        return cached[1]
+
+    infos = socket.getaddrinfo(hostname, None)
+    if _DNS_CACHE_TTL_S > 0:
+        _dns_cache[hostname] = (now + _DNS_CACHE_TTL_S, infos)
+    return infos
+
+
 def _reject_if_disallowed_ip(hostname: str) -> None:
     try:
-        infos = socket.getaddrinfo(hostname, None)
+        infos = _resolve_cached(hostname)
     except socket.gaierror as exc:
         raise HTTPException(status_code=400, detail=f"could not resolve host: {hostname}") from exc
 
