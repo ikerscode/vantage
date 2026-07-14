@@ -209,7 +209,7 @@ button {
     letter-spacing: 0.34em;
   }
 }
-/* Chrome assembly (motion-pass brief, effect #1) — the HUD chrome staggers
+/* Chrome assembly (motion-pass brief, effect #1). The HUD chrome staggers
    in as the boot splash clears. Named vg-chrome-in, NOT the brief's
    vg-boot-in: that name was already taken above by the splash wordmark's
    letter-spacing animation, with different semantics. */
@@ -224,7 +224,7 @@ button {
   }
 }
 /* The command bar centers itself with translateX(-50%); a keyframe ending in
-   `transform: none` would clobber that and snap it left — so its variant
+   `transform: none` would clobber that and snap it left, so its variant
    carries the centering through both frames. */
 @keyframes vg-chrome-in-centered {
   from {
@@ -236,7 +236,7 @@ button {
     transform: translateX(-50%);
   }
 }
-/* Scan-sweep (effect #4) — a thin line tracks down the map while an analysis
+/* Scan-sweep (effect #4): a thin line tracks down the map while an analysis
    is in flight. Transform-based (the brief animated `top`, which forces
    layout every frame); translateY composites on the GPU. 100vh is safe: the
    map region is always the full viewport (see .hud-shell). */
@@ -256,13 +256,13 @@ button {
     opacity: 0;
   }
 }
-/* Selected-AOI breathing glow (effect #6 — cheap CSS variant, see README's
-   option (b): savedAoisLayer in MapCanvas.tsx is a deck.gl canvas layer, so
+/* Selected-AOI breathing glow (effect #6, cheap CSS variant, see README's
+   option (b)). savedAoisLayer in MapCanvas.tsx is a deck.gl canvas layer, so
    CSS can't reach it directly, and a second animated deck.gl layer just for
    "selected, not alerted" would compete visually with the alert-glow layer
-   above for the same accent color while adding another per-tick rebuild —
-   not worth it for a plain-selection cue. Pulsing the row's own accent bar
-   in the AOI list gets the same "this one is live" read for free. */
+   above for the same accent color while adding another per-tick rebuild. Not
+   worth it for a plain-selection cue. Pulsing the row's own accent bar in the
+   AOI list gets the same "this one is live" read for free. */
 @keyframes vg-row-glow {
   0%,
   100% {
@@ -450,7 +450,7 @@ button {
   line-height: 1.5;
 }
 
-/* Scan-sweep (effect #4) — visible only while an analysis is pending/running
+/* Scan-sweep (effect #4): visible only while an analysis is pending/running
    (MapCanvas gates this on the same activeAnalysis.status check ResultsFeed
    already uses for its job-card). */
 .map-scan-sweep {
@@ -469,7 +469,7 @@ button {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  /* No sensible static substitute for a sweep — just omit it rather than
+  /* No sensible static substitute for a sweep, so just omit it rather than
      freeze it mid-frame at an arbitrary position. */
   .map-scan-sweep {
     display: none;
@@ -828,9 +828,9 @@ button {
 
 /* Pressed: a small, tactile depress. Excludes disabled controls. .switch and
    .row were already in the transition list above but never got a pressed
-   state of their own — added here. .row's depress is subtler (0.99, not
-   0.97): it's a much bigger hit target than a button, so the same scale
-   would read as an exaggerated jump rather than a press. */
+   state of their own until now. .row's depress is subtler (0.99, not 0.97):
+   it's a much bigger hit target than a button, so the same scale would read
+   as an exaggerated jump rather than a press. */
 .tag:active:not(:disabled),
 .icon-button:active:not(:disabled),
 .aoi-draw-button:active:not(:disabled),
@@ -1093,7 +1093,7 @@ button {
   border-right: none;
 }
 
-/* Was a 14%-opacity wash + a 2px inset line — too subtle to read at a
+/* Was a 14%-opacity wash + a 2px inset line, too subtle to read at a
    glance as "this is the selected mode" vs. "I'm not sure that click did
    anything" (direct feedback). A solid fill + bold weight + outer glow
    makes the selected tab unmistakable against the other two, not just
@@ -1120,7 +1120,7 @@ button {
      fixed-452px, centered bar can overlap .mode-switcher (left: 16px, own
      width varies with label text). Caps it to whatever room is actually
      left of the mode switcher and its gap, so it shrinks instead of
-     colliding. Not itself a motion change — a real responsive bug the
+     colliding. Not itself a motion change, just a real responsive bug the
      stagger work surfaced. */
   max-width: min(452px, calc(100vw - 580px));
   z-index: 9;
@@ -1440,7 +1440,7 @@ button {
   border-color: rgba(248, 81, 73, 0.42);
 }
 
-/* Honest-seam note under the Detections toggle — the bundled detector is a
+/* Honest-seam note under the Detections toggle: the bundled detector is a
    generic placeholder, not an overhead-imagery model (CLAUDE.md §3). */
 .layer-note {
   padding: 7px 13px 9px;
@@ -1542,14 +1542,13 @@ button {
   /* Height is user-controlled (see .scrubber-resize-handle / the
      scrubberHeight state in TemporalScrubber.tsx).
      overflow: visible here is deliberate and overrides .panel's inherited
-     overflow:hidden — the resize handle and size presets are positioned
-     OUTSIDE this box on purpose (negative top offsets, floating above the
-     panel's edge), and any non-visible overflow on either axis clips
-     those per spec (setting overflow-y alone still computes overflow-x to
-     auto, not visible, so it was clipping in both directions). The actual
-     scrolling now happens on .scrubber-body below instead, so this box
-     stays a pure positioning/sizing container with nothing of its own to
-     clip. */
+     overflow:hidden. The resize handle is positioned OUTSIDE this box on
+     purpose (a negative top offset, floating above the panel's edge), and
+     any non-visible overflow on either axis clips it per spec (setting
+     overflow-y alone still computes overflow-x to auto, not visible, so it
+     was clipping in both directions). The actual scrolling now happens on
+     .scrubber-body below instead, so this box stays a pure
+     positioning/sizing container with nothing of its own to clip. */
   overflow: visible;
   display: flex;
   flex-direction: column;
@@ -1560,15 +1559,15 @@ button {
 /* The actual scrollable/padded content region. Split out from .scrubber
    itself for exactly one reason: overflow:auto here (not on .scrubber)
    means content that doesn't fit the chosen height scrolls, while the
-   resize handle/presets — siblings of this, direct children of .scrubber —
-   stay outside its clipping and remain visible/clickable above the panel's
+   resize handle (a sibling of this, a direct child of .scrubber) stays
+   outside its clipping and remains visible and clickable above the panel's
    top edge. */
 .scrubber-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   /* Explicit, not left to default: per spec, setting only overflow-y makes
-     overflow-x compute to auto too (not visible) — without this, any row
+     overflow-x compute to auto too (not visible). Without this, any row
      too wide for the panel (the header's title+dates+search+mode-toggle
      all share one unwrapped flex line) grew a horizontal scrollbar along
      the bottom. Vertical scrolling only; horizontal overflow just clips. */
@@ -1579,9 +1578,10 @@ button {
   gap: 5px;
 }
 
-/* Drag handle — top edge of the timeline panel, lets its height be set by
-   hand (see scrubberHeight in TemporalScrubber.tsx). Positioned to overlap
-   the panel's own top border rather than taking up flex space inside it. */
+/* Drag handle at the top edge of the timeline panel, lets its height be set
+   by hand (see scrubberHeight in TemporalScrubber.tsx). Positioned to
+   overlap the panel's own top border rather than taking up flex space
+   inside it. */
 .scrubber-resize-handle {
   position: absolute;
   top: -5px;
@@ -1611,7 +1611,7 @@ button {
 /* Reassemble pop (motion-pass brief, effect #2). TemporalScrubber's monitor
    vs explore/analyze branches both return this same className at the same
    tree position with no key, so React would otherwise patch it in place
-   (not remount it) on a mode switch — the component itself keys these two
+   (not remount it) on a mode switch. The component itself keys these two
    elements on `mode` (see TemporalScrubber.tsx) specifically so this
    animation actually replays instead of firing once on first mount only. */
 .scrubber-header {
@@ -1663,7 +1663,7 @@ button {
   background: var(--accent-dim);
 }
 
-/* Sensor picker (Optical/SAR) at AOI creation — same segmented-control
+/* Sensor picker (Optical/SAR) at AOI creation. Same segmented-control
    language as .scrubber-mode-toggle, self-contained so it doesn't need to
    join that class's scattered shared-selector lists above. */
 .aoi-sensor-toggle {

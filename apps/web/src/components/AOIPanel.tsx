@@ -40,7 +40,7 @@ export function AOIPanel() {
   const [editingName, setEditingName] = useState("");
 
   const [draftName, setDraftName] = useState("");
-  // Sensor this AOI will be tracked with — fixed for its lifetime once saved
+  // Sensor this AOI will be tracked with, fixed for its lifetime once saved
   // (see apps/api/app/imagery/sensor.py). Defaults to optical since that's
   // the backend's own default and the far more common case.
   const [draftCollection, setDraftCollection] = useState<"sentinel-2-l2a" | "sentinel-1-grd">(
@@ -108,10 +108,10 @@ export function AOIPanel() {
   };
 
   // Editing an EXISTING AOI's name/geometry. Kept mutually exclusive with
-  // drawing a new one (starting either cancels the other) — MapCanvas's
-  // draw layer can only be in one mode (DrawPolygonMode vs ModifyMode) at a
-  // time, so letting both stay "active" at once would silently discard
-  // whichever one the map layer isn't currently honoring.
+  // drawing a new one (starting either cancels the other), because
+  // MapCanvas's draw layer can only be in one mode (DrawPolygonMode vs
+  // ModifyMode) at a time, so letting both stay "active" at once would
+  // silently discard whichever one the map layer isn't currently honoring.
   const handleStartEdit = (aoi: NonNullable<typeof aois>[number]) => {
     handleCancel();
     setEditingAoiId(aoi.id);
@@ -134,7 +134,7 @@ export function AOIPanel() {
     const areaKm2 = polygonAreaKm2(editingGeometry);
     if (areaKm2 > MAX_AOI_AREA_KM2) {
       pushErrorToast(
-        `This AOI covers ${Math.round(areaKm2).toLocaleString()} km² — the limit is ` +
+        `This AOI covers ${Math.round(areaKm2).toLocaleString()} km², but the limit is ` +
           `${MAX_AOI_AREA_KM2.toLocaleString()} km². Drag vertices closer together and try again.`,
       );
       return;
@@ -182,7 +182,7 @@ export function AOIPanel() {
           />
           <div
             className="aoi-sensor-toggle"
-            title="Sensor this AOI is tracked with — fixed once saved"
+            title="Sensor this AOI is tracked with, fixed once saved"
           >
             <button
               className={draftCollection === "sentinel-2-l2a" ? "active" : ""}

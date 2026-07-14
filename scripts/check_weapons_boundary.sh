@@ -26,21 +26,17 @@ PATTERN='targeting|fire.?control|weaponeer|kill.?chain|weapon(ize|ization)?|leth
 # Exact file:line matches that are known-safe negations/compliance comments
 # *inside application code*. Extend only with a reviewed reason.
 #
-# NOTE: the previous entry here (MapCanvas.tsx:19) had gone stale — that
-# line is now plain import-statement code with no compliance comment at
-# all, almost certainly because an earlier edit reworded/moved the comment
-# it once pointed at without updating this allowlist. A dead file:line is
-# harmless (it just never matches anything), but leaving it violates this
-# project's own "honest, mechanically current markers" convention
-# (CLAUDE.md §3) — so it's corrected here, pointed at the actual current
-# location of MapCanvas.tsx's no-lock-on-iconography compliance comment
-# (added by the motion-pass brief's effect #5 rework, which replaced a
-# proposed red "lock-bracket" UI with an accent-cyan glow specifically to
-# stay on the right side of this boundary).
-ALLOWLIST=$(cat <<'EOF'
-apps/web/src/components/MapCanvas.tsx:41
-EOF
-)
+# Currently empty, and that's the goal. The one comment that used to trip
+# this gate (MapCanvas.tsx, explaining why the alerted-AOI cue is an accent
+# glow rather than lock-on iconography) was reworded to describe what it
+# avoids without using a gate term, so it no longer matches and needs no
+# entry. There was also a stale entry here for a while (MapCanvas.tsx:19)
+# left pointing at a line that had since become a plain import; a dead
+# file:line is harmless but drifts from the "honest, mechanically current
+# markers" convention (CLAUDE.md §3), so it's gone too. Add an entry only
+# for a genuine, reviewed negation/compliance comment that can't reasonably
+# be reworded, by exact file:line.
+ALLOWLIST=""
 
 HITS=$(grep -rniE "$PATTERN" \
   --include="*.py" --include="*.ts" --include="*.tsx" --include="*.rs" \

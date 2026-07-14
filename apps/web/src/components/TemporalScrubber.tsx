@@ -32,9 +32,9 @@ function tickPosition(sceneDate: string, from: string, to: string): number {
 }
 
 // User-resizable timeline panel height (drag the handle on its top edge).
-// Persisted across sessions — the first thing anyone does with a resize
-// handle is set it once to their preference and never think about it again;
-// re-defaulting on every reload would be a small but real annoyance.
+// Persisted across sessions: the first thing anyone does with a resize
+// handle is set it once to their preference and never think about it again,
+// so re-defaulting on every reload would be a small but real annoyance.
 const SCRUBBER_HEIGHT_STORAGE_KEY = "vantage.scrubberHeightPx";
 const SCRUBBER_MIN_HEIGHT = 44;
 const SCRUBBER_MAX_HEIGHT = 420;
@@ -71,7 +71,7 @@ export function TemporalScrubber() {
   const [scrubberHeight, setScrubberHeight] = useState(loadStoredScrubberHeight);
 
   // Drag-to-resize (top edge handle). startY/startHeight are captured once
-  // per gesture in this closure — not component state — so the move/up
+  // per gesture in this closure (not in component state), so the move/up
   // listeners added here are the exact same function references removed on
   // mouseup, regardless of how many re-renders (from setScrubberHeight
   // itself) happen mid-drag.
@@ -81,8 +81,8 @@ export function TemporalScrubber() {
     const startHeight = scrubberHeight;
 
     const handleMove = (moveEvent: MouseEvent) => {
-      // Dragging UP shrinks clientY, which should GROW the panel — it's
-      // anchored to the bottom of the screen, so "up" is "taller".
+      // Dragging UP shrinks clientY, which should GROW the panel, since it's
+      // anchored to the bottom of the screen, so "up" means "taller".
       setScrubberHeight(clampScrubberHeight(startHeight + (startY - moveEvent.clientY)));
     };
     const handleUp = () => {
@@ -132,7 +132,7 @@ export function TemporalScrubber() {
           aoi_id: selectedAoiId,
           date_from: dateFrom,
           date_to: dateTo,
-          // Search the AOI's own sensor collection (optical vs SAR) — before
+          // Search the AOI's own sensor collection (optical vs SAR). Before
           // this, every AOI searched the backend's global optical default
           // regardless of what it was actually tracked against, so a SAR AOI
           // would only ever turn up sentinel-2-l2a results (or none).
@@ -216,7 +216,7 @@ export function TemporalScrubber() {
         <div className="scrubber-resize-handle" onMouseDown={handleResizeStart} title="Drag to resize" />
         <div className="scrubber-body">
           {/* key={mode}: forces a real remount when switching Explore/Analyze
-              <-> Monitor (see styles.css's .scrubber-header comment) — without
+              <-> Monitor (see styles.css's .scrubber-header comment). Without
               it, React reconciles this same div in place across the branch
               swap below and the pop-in animation would only ever fire once,
               on first mount. */}

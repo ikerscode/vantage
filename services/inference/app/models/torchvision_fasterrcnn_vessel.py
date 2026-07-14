@@ -46,11 +46,11 @@ class TorchvisionFasterRCNNVessel(ModelBackend):
 
         # weights_only=True (SEC, BRIEF v1.9): this checkpoint is a plain
         # state_dict of tensors, so this is functionally invisible (verified:
-        # identical eval F1 before/after — see VESSEL_DETECTION_REPORT.md),
+        # identical eval F1 before and after, see VESSEL_DETECTION_REPORT.md),
         # but it refuses to run the arbitrary-code pickle path during
         # deserialization. That matters more now that weights can travel via
-        # a container registry (BRIEF v1.7 thin-install) rather than only
-        # ever being this project's own local training output.
+        # a container registry (BRIEF v1.7 thin-install), not just as this
+        # project's own local training output.
         state_dict = torch.load(weights_path, map_location="cpu", weights_only=True)
         self._model.load_state_dict(state_dict)
         self._model.eval()

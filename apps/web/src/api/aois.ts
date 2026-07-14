@@ -25,7 +25,7 @@ interface CreateAoiInput {
   name: string;
   description?: string;
   geometry: GeoJSONPolygon;
-  // "sentinel-2-l2a" (optical, backend default) | "sentinel-1-grd" (SAR) —
+  // "sentinel-2-l2a" (optical, backend default) or "sentinel-1-grd" (SAR);
   // see lib/sensor.ts. Omit to take the backend's optical default.
   collection?: string;
 }
@@ -45,9 +45,9 @@ interface UpdateAoiInput {
   id: string;
   name?: string;
   description?: string;
-  // Collection/sensor is deliberately NOT here — fixed for an AOI's
-  // lifetime (see CreateAoiInput's comment); the backend's AOIUpdate schema
-  // doesn't accept it either.
+  // Collection/sensor is deliberately NOT here. It's fixed for an AOI's
+  // lifetime (see CreateAoiInput's comment), and the backend's AOIUpdate
+  // schema doesn't accept it either.
   geometry?: GeoJSONPolygon;
 }
 

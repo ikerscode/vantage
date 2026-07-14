@@ -25,7 +25,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     # BRIEF v1.9 #1: bake THIS release's image-digest-manifest URL into the
     # launcher at compile time (launcher-core/src/images.rs reads it via
-    # option_env!). Only the URL is known now — the digests it points at don't
+    # option_env!). Only the URL is known now; the digests it points at don't
     # exist until publish-images (needs: release) pushes the images later and
     # uploads image-digests.json to this same release. The launcher fetches
     # the real digests from here at install time, by which point that upload
@@ -222,7 +222,7 @@ jobs:
       # GHCR assigned it, into image-digests.json. The launcher (built by the
       # `release` job with this release's manifest URL baked in) fetches this
       # at install time and pulls image@sha256:<digest> instead of the mutable
-      # :1.0.0 tag — so a later retag of that tag can't be silently trusted by
+      # :1.0.0 tag, so a later retag of that tag can't be silently trusted by
       # a thin-install. Generating it HERE, right after each push, is the only
       # point the real digests exist and can't drift from what was published.
       - name: Push production images to GHCR + record their immutable digests
@@ -259,7 +259,7 @@ jobs:
     needs: [release, publish-images]
     runs-on: ubuntu-22.04
     # BRIEF v1.9: least privilege. This job downloads already-published
-    # release assets and runs them on a clean runner — it never writes to the
+    # release assets and runs them on a clean runner; it never writes to the
     # repo or its packages. An explicit read-only override, since the
     # top-level `permissions: contents: write` (needed by `release`) would
     # otherwise be inherited here too.
@@ -455,8 +455,9 @@ jobs:
     needs: [release, publish-images]
     runs-on: ubuntu-22.04
     # BRIEF v1.9: least privilege. Downloads the installer release asset and
-    # pulls the (public) GHCR images anonymously — no repo/package writes.
-    # Explicit read-only override of the inherited top-level write scope.
+    # pulls the (public) GHCR images anonymously, without writing to the repo
+    # or its packages. Explicit read-only override of the inherited top-level
+    # write scope.
     permissions:
       contents: read
     steps:

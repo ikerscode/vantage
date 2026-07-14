@@ -36,14 +36,14 @@ const MUTED_FILL: [number, number, number, number] = [139, 148, 158, 18];
 // Detection red (matches the --alert token used across the HUD chrome).
 const DETECTION_RED: [number, number, number] = [248, 81, 73];
 const DETECTION_SELECTED_LINE: [number, number, number, number] = [255, 138, 128, 255];
-// Alert glow (motion-pass brief, effect #5 — reworked). The brief's mockup
-// used red corner "lock-brackets" snapped onto the alerted AOI; that's
-// lock-on/targeting iconography, which CLAUDE.md §5 rules out categorically
-// (see Compass.tsx's existing "no reticle/lock-on iconography" comment) —
-// the same restraint this codebase already applies everywhere else on the
-// map. A breathing accent-cyan outline draws the same eye to the same AOI
-// (an observation cue, "this is where a monitor fired"), with no aim point
-// and no red-on-a-box vocabulary.
+// Alert glow (motion-pass brief, effect #5, reworked). The brief's mockup
+// used red corner "lock-brackets" snapped onto the alerted AOI, which is
+// exactly the reticle/lock-on iconography CLAUDE.md §5 rules out (see
+// Compass.tsx's existing "no reticle/lock-on iconography" comment). It's the
+// same restraint this codebase already applies everywhere else on the map. A
+// breathing accent-cyan outline draws the same eye to the same AOI (an
+// observation cue that says "this is where a monitor fired"), with no aim
+// point and no red box.
 const ALERT_GLOW_LINE_RGB: [number, number, number] = [63, 184, 212];
 
 // Pulse (not blink): the detection/change overlays breathe smoothly between a
@@ -218,17 +218,17 @@ export function MapCanvas() {
   const tilerToken = useAuthStore((s) => s.tilerToken);
 
   // Alert glow (see ALERT_GLOW_LINE_RGB above). useMonitorAlertStatus is
-  // already called independently by StatusStrip/MonitorPanel/TemporalScrubber
-  // — this just subscribes to the same react-query cache, no extra fetch.
+  // already called independently by StatusStrip/MonitorPanel/TemporalScrubber,
+  // so this just subscribes to the same react-query cache, no extra fetch.
   const { alertMonitors, isAnyAlert } = useMonitorAlertStatus();
   // A stable, value-comparable key for which AOIs are currently alerting.
   // alertMonitors itself is a fresh array on every render (the hook
   // recomputes it inline each call), so using it directly as an effect
   // dependency below would rebuild the alert-glow/detections layers on
   // every unrelated MapCanvas re-render (e.g. every tile-load toggling
-  // tilesLoading), not just when the alerting set actually changes —
-  // matches this file's existing PERF discipline (see the pulse-tick split
-  // above this component was built around).
+  // tilesLoading), not just when the alerting set actually changes. This
+  // matches the file's existing PERF discipline (see the pulse-tick split
+  // this component was built around).
   const alertAoiIdsKey = alertMonitors
     .map((m) => m.aoi_id)
     .sort()
@@ -236,8 +236,8 @@ export function MapCanvas() {
 
   // Same one-time, non-reactive check BootSequence.tsx already uses. Gates
   // every *continuous* loop this component drives (the shared pulse below,
-  // and the CSS radar-sweep/scan-sweep in styles.css) — a brief mid-page
-  // motion burst is left alone, only the infinite ambient ones are skipped.
+  // and the CSS scan-sweep in styles.css). A brief mid-page motion burst is
+  // left alone; only the infinite ambient ones are skipped.
   const prefersReducedMotion =
     typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -258,7 +258,7 @@ export function MapCanvas() {
     // own second interval for what's visually the same kind of pulse.
     const anyOverlay = detectionsVisible || changeVisible || isAnyAlert;
     // Paused while drawing (nothing to gain re-churning mid-draw), and
-    // entirely skipped under prefers-reduced-motion — pins at full
+    // entirely skipped under prefers-reduced-motion, which pins it at full
     // brightness/opacity instead of a frozen mid-fade value.
     if (!anyOverlay || isDrawing || prefersReducedMotion) {
       setPulseLevel(PULSE_BRIGHT);
@@ -432,18 +432,17 @@ export function MapCanvas() {
   }, [isDrawing]);
 
   // ModifyMode (reshaping an existing AOI's vertices) is fundamentally a
-  // press-and-drag gesture on a vertex handle — unlike DrawPolygonMode
-  // above, which only ever needs plain clicks, so dragPan staying enabled
-  // there never conflicted with anything. Left enabled here too, a
-  // vertex-drag and MapLibre's own drag-pan fire off the SAME gesture on
-  // the same interleaved canvas at once: the map pans underneath the
-  // vertex you're dragging, so it visibly lags/fights/jumps instead of
-  // tracking the cursor cleanly. This is almost certainly the real source
-  // of "still janky" after the picking-radius/handle-size fix — that fix
-  // was about successfully STARTING a drag; this is about it fighting the
-  // map for the rest of the gesture. Scoped to editingAoiId only —
-  // drawing's own dragPan-stays-on behavior (BRIEF v2, see above) is
-  // untouched.
+  // press-and-drag gesture on a vertex handle. DrawPolygonMode above only
+  // ever needs plain clicks, so dragPan staying enabled there never
+  // conflicted with anything. Left enabled here too, a vertex-drag and
+  // MapLibre's own drag-pan fire off the SAME gesture on the same interleaved
+  // canvas at once: the map pans underneath the vertex you're dragging, so it
+  // visibly lags and jumps instead of tracking the cursor cleanly. This is
+  // almost certainly the real source of "still janky" after the
+  // picking-radius/handle-size fix. That fix was about successfully STARTING
+  // a drag; this is about it fighting the map for the rest of the gesture.
+  // Scoped to editingAoiId only, so drawing's own dragPan-stays-on behavior
+  // (BRIEF v2, see above) is untouched.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -466,10 +465,10 @@ export function MapCanvas() {
       id: "saved-aois",
       data: {
         type: "FeatureCollection",
-        // Excludes the AOI currently being reshaped — its live, editable
+        // Excludes the AOI currently being reshaped. Its live, editable
         // geometry is drawn by drawLayer below instead, so this doesn't
         // also render its last-saved (increasingly stale, mid-edit)
-        // geometry underneath/behind it.
+        // geometry underneath it.
         features: (aois ?? [])
           .filter((aoi) => aoi.id !== editingAoiId)
           .map((aoi) => ({
@@ -499,7 +498,7 @@ export function MapCanvas() {
     // Reshaping an existing AOI (editingAoiId set) and drawing a brand-new
     // one (isDrawing/draftGeometry) are mutually exclusive (see
     // AOIPanel.tsx's handleStartEdit/the DRAW NEW AOI button's onClick),
-    // so one EditableGeoJsonLayer can serve both — it's just a different
+    // so one EditableGeoJsonLayer can serve both: it's just a different
     // mode/data/callback depending on which (if either) is active.
     const activeGeometry = editingAoiId ? editingGeometry : draftGeometry;
     const drawLayer = new EditableGeoJsonLayer({
@@ -529,23 +528,23 @@ export function MapCanvas() {
       lineWidthUnits: "pixels",
       getLineWidth: 1.5,
       // pickingRadius: deck.gl's hit-testing defaults to near-exact-pixel
-      // precision with this unset — a mouse a couple pixels off a small
-      // handle simply misses, no drag starts at all. This is almost
+      // precision with this unset, so a mouse a couple pixels off a small
+      // handle simply misses and no drag starts at all. This is almost
       // certainly why reshaping felt "janky, hard to grab": nothing was
       // actually broken, the grabbable area was just far smaller than the
       // rendered handle looked. A generous pixel tolerance here is the
       // single highest-leverage fix for that.
       pickingRadius: 10,
       // Vertex handles. The old comment here claimed "9px accent squares"
-      // but the actual radius was 5 — a real, pre-existing mismatch between
+      // but the actual radius was 5, a real pre-existing mismatch between
       // intent and code (not something this pass introduced, but worth
       // fixing while touching this). ModifyMode renders two distinct kinds
-      // of handle: 'existing' (a real vertex — drag to move it) and
-      // 'intermediate' (a midpoint — click to insert a new vertex there).
+      // of handle: 'existing' (a real vertex, drag to move it) and
+      // 'intermediate' (a midpoint, click to insert a new vertex there).
       // Both used to render identically, so there was no way to tell drag
-      // targets from insert targets by looking — sized/shaded apart here so
-      // existing vertices read as the primary, easy-to-grab target and
-      // intermediate ones as a secondary, deliberate action.
+      // targets from insert targets by looking. They're sized and shaded
+      // apart here so existing vertices read as the primary, easy-to-grab
+      // target and intermediate ones as a secondary, deliberate action.
       editHandlePointRadiusUnits: "pixels",
       getEditHandlePointRadius: (handle: { properties?: { editHandleType?: string } }) =>
         handle.properties?.editHandleType === "intermediate" ? 4 : 8,
@@ -726,8 +725,8 @@ export function MapCanvas() {
       const trueColorUrl = visualHref ? trueColorTilejsonUrl(visualHref) : null;
       const ndviUrl = selectedScene?.self_href ? ndviTilejsonUrl(selectedScene.self_href) : null;
       // SAR's vv/vh bands are multi-asset STAC-item reads too (same shape as
-      // NDVI's red/nir), so these key off self_href the same way NDVI does —
-      // there's no single-file "visual" composite for Sentinel-1.
+      // NDVI's red/nir), so these key off self_href the same way NDVI does.
+      // There's no single-file "visual" composite for Sentinel-1.
       const sarAmplitudeUrl = selectedScene?.self_href
         ? sarAmplitudeTilejsonUrl(selectedScene.self_href)
         : null;
@@ -807,7 +806,7 @@ export function MapCanvas() {
     map.setPaintProperty("change-layer", "raster-opacity", rasterOpacity.change * pulseLevel);
   }, [pulseLevel, changeVisible, rasterOpacity, activeAnalysis]);
 
-  // Scan-sweep (motion-pass brief, effect #4) — same condition ResultsFeed's
+  // Scan-sweep (motion-pass brief, effect #4). Same condition ResultsFeed's
   // job-card already uses for "an analysis is in flight".
   const showScanSweep = Boolean(
     activeAnalysis && (activeAnalysis.status === "pending" || activeAnalysis.status === "running"),
