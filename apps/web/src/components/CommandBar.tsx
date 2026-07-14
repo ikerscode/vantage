@@ -1,11 +1,45 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useAois } from "../api/aois";
+import { apiFetch } from "../api/client";
+import type { GeoJSONPolygon, StacItemSummary } from "../api/types";
 import { polygonAreaKm2, polygonCentroid } from "../lib/geo";
 import { mgrsToLatLon } from "../lib/mgrs";
 import { useAoiStore } from "../store/aoiStore";
 import { useAnalysisStore } from "../store/analysisStore";
 import { useMapStore } from "../store/mapStore";
+
+// Small bbox around a bare coordinate jump, used only for the "preview
+// imagery before drawing an AOI" search below — big enough to almost
+// always land at least one covering Sentinel-2 granule, small enough that
+// the search stays cheap. ~0.05° is ~5.5km at the equator (less at higher
+// latitudes), well under a single granule's ~110km footprint.
+const PREVIEW_BUFFER_DEG = 0.05;
+
+function previewGeometry(lon: number, lat: number): GeoJSONPolygon {
+  const d = PREVIEW_BUFFER_DEG;
+  return {
+    type: "Polygon",
+    coordinates: [
+      [
+        [lon - d, lat - d],
+        [lon + d, lat - d],
+        [lon + d, lat + d],
+        [lon - d, lat + d],
+        [lon - d, lat - d],
+      ],
+    ],
+  };
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+function monthsAgoIso(months: number): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() - months);
+  return d.toISOString().slice(0, 10);
+}
 
 interface CoordMatch {
   kind: "coord";
@@ -64,7 +98,35 @@ export function CommandBar() {
   const { data: aois } = useAois();
   const setSelectedAoiId = useAoiStore((s) => s.setSelectedAoiId);
   const setInspectorTarget = useAnalysisStore((s) => s.setInspectorTarget);
+  const setSelectedScene = useAnalysisStore((s) => s.setSelectedScene);
   const requestFlyTo = useMapStore((s) => s.requestFlyTo);
+
+  // Lets a bare coordinate jump show real imagery before any AOI exists
+  // there — an operator sizing up a location to circle should see the
+  // ground first, not a black void until they've committed to drawing.
+  // Best-effort and silent on failure/empty results: no covering scene
+  // (ocean, catalog gap, etc.) just leaves the existing "No imagery loaded"
+  // empty-hint showing, which is already the correct rendering of that
+  // state — not worth a toast for what's an expected outcome much of the
+  // time, not a real error.
+  const previewCoordinate = async (lon: number, lat: number) => {
+    try {
+      const scenes = await apiFetch<StacItemSummary[]>("/api/stac/search", {
+        method: "POST",
+        body: JSON.stringify({
+          geometry: previewGeometry(lon, lat),
+          date_from: monthsAgoIso(24),
+          date_to: todayIso(),
+          collections: ["sentinel-2-l2a"],
+        }),
+      });
+      if (scenes.length === 0) return;
+      const best = [...scenes].sort((a, b) => b.datetime.localeCompare(a.datetime))[0];
+      setSelectedScene(best);
+    } catch {
+      // best-effort preview — see comment above
+    }
+  };
 
   // Global ⌘K / Ctrl+K hotkey to focus the bar from anywhere.
   useEffect(() => {
@@ -113,6 +175,12 @@ export function CommandBar() {
   const jumpTo = (match: Match) => {
     if (match.kind === "coord") {
       requestFlyTo({ longitude: match.lon, latitude: match.lat, zoom: 12 });
+      // A bare coordinate jump isn't any saved AOI — deselect whichever one
+      // was previously active so its imagery doesn't stay on screen looking
+      // like it belongs to this new location.
+      setSelectedAoiId(null);
+      setInspectorTarget(null);
+      void previewCoordinate(match.lon, match.lat);
     } else {
       setSelectedAoiId(match.id);
       setInspectorTarget({ kind: "aoi", id: match.id });

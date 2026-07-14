@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { useAois, useArchiveAoi, useCreateAoi } from "../api/aois";
+import { useAois, useArchiveAoi, useCreateAoi, useUpdateAoi } from "../api/aois";
 import { polygonAreaKm2, polygonCentroid } from "../lib/geo";
 import { useAnalysisStore } from "../store/analysisStore";
 import { useAoiStore } from "../store/aoiStore";
@@ -20,6 +20,7 @@ const MAX_AOI_AREA_KM2 = 50_000;
 export function AOIPanel() {
   const { data: aois, isLoading } = useAois();
   const createAoi = useCreateAoi();
+  const updateAoi = useUpdateAoi();
   const archiveAoi = useArchiveAoi();
 
   const selectedAoiId = useAoiStore((s) => s.selectedAoiId);
@@ -28,9 +29,15 @@ export function AOIPanel() {
   const setDraftGeometry = useAoiStore((s) => s.setDraftGeometry);
   const isDrawing = useAoiStore((s) => s.isDrawing);
   const setIsDrawing = useAoiStore((s) => s.setIsDrawing);
+  const editingAoiId = useAoiStore((s) => s.editingAoiId);
+  const setEditingAoiId = useAoiStore((s) => s.setEditingAoiId);
+  const editingGeometry = useAoiStore((s) => s.editingGeometry);
+  const setEditingGeometry = useAoiStore((s) => s.setEditingGeometry);
   const setInspectorTarget = useAnalysisStore((s) => s.setInspectorTarget);
   const setMode = useMapStore((s) => s.setMode);
   const requestFlyTo = useMapStore((s) => s.requestFlyTo);
+
+  const [editingName, setEditingName] = useState("");
 
   const [draftName, setDraftName] = useState("");
   // Sensor this AOI will be tracked with — fixed for its lifetime once saved
@@ -100,6 +107,44 @@ export function AOIPanel() {
     setDraftCollection("sentinel-2-l2a");
   };
 
+  // Editing an EXISTING AOI's name/geometry. Kept mutually exclusive with
+  // drawing a new one (starting either cancels the other) — MapCanvas's
+  // draw layer can only be in one mode (DrawPolygonMode vs ModifyMode) at a
+  // time, so letting both stay "active" at once would silently discard
+  // whichever one the map layer isn't currently honoring.
+  const handleStartEdit = (aoi: NonNullable<typeof aois>[number]) => {
+    handleCancel();
+    setEditingAoiId(aoi.id);
+    setEditingGeometry(aoi.geometry);
+    setEditingName(aoi.name);
+    setSelectedAoiId(aoi.id);
+    setInspectorTarget({ kind: "aoi", id: aoi.id });
+    const { longitude, latitude } = polygonCentroid(aoi.geometry);
+    requestFlyTo({ longitude, latitude, zoom: 12 });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingAoiId(null);
+    setEditingGeometry(null);
+    setEditingName("");
+  };
+
+  const handleSaveEdit = () => {
+    if (!editingAoiId || !editingGeometry || !editingName.trim()) return;
+    const areaKm2 = polygonAreaKm2(editingGeometry);
+    if (areaKm2 > MAX_AOI_AREA_KM2) {
+      pushErrorToast(
+        `This AOI covers ${Math.round(areaKm2).toLocaleString()} km² — the limit is ` +
+          `${MAX_AOI_AREA_KM2.toLocaleString()} km². Drag vertices closer together and try again.`,
+      );
+      return;
+    }
+    updateAoi.mutate(
+      { id: editingAoiId, name: editingName.trim(), geometry: editingGeometry },
+      { onSuccess: handleCancelEdit },
+    );
+  };
+
   const isEmpty = !isLoading && (aois ?? []).length === 0;
 
   return (
@@ -114,7 +159,12 @@ export function AOIPanel() {
       <div className="aoi-draw-row">
         <button
           className={isDrawing ? "aoi-draw-button active" : "aoi-draw-button"}
-          onClick={() => setIsDrawing(!isDrawing)}
+          disabled={!!editingAoiId}
+          title={editingAoiId ? "Finish or cancel the current edit first" : undefined}
+          onClick={() => {
+            if (!isDrawing) handleCancelEdit();
+            setIsDrawing(!isDrawing);
+          }}
         >
           <span>＋</span>
           {isDrawing ? "DRAWING… CLICK TO ADD VERTEX" : "DRAW NEW AOI"}
@@ -185,6 +235,42 @@ export function AOIPanel() {
           {isLoading && <li className="hint">loading…</li>}
           {(aois ?? []).map((aoi) => {
             const active = aoi.id === selectedAoiId;
+
+            if (editingAoiId === aoi.id) {
+              return (
+                <li key={aoi.id} className="aoi-draft-form">
+                  <input
+                    className="text-input"
+                    style={{ flex: "1 1 100%" }}
+                    placeholder="AOI name"
+                    value={editingName}
+                    onChange={(e) => setEditingName(e.target.value)}
+                    autoFocus
+                  />
+                  <span className="hint" style={{ flex: "1 1 100%" }}>
+                    drag the polygon's vertices on the map to reshape it
+                  </span>
+                  <button
+                    className={updateAoi.isPending ? "tag btn-busy" : "tag"}
+                    onClick={handleSaveEdit}
+                    disabled={updateAoi.isPending}
+                  >
+                    {updateAoi.isPending ? (
+                      <>
+                        <span className="spinner" />
+                        SAVING…
+                      </>
+                    ) : (
+                      "SAVE"
+                    )}
+                  </button>
+                  <button className="tag" onClick={handleCancelEdit} disabled={updateAoi.isPending}>
+                    CANCEL
+                  </button>
+                </li>
+              );
+            }
+
             return (
               <li
                 key={aoi.id}
@@ -204,6 +290,17 @@ export function AOIPanel() {
                   </div>
                   <span className="aoi-row-line2">created {aoi.created_at.slice(0, 10)}</span>
                 </div>
+                <button
+                  className="icon-button"
+                  title={isDrawing ? "Finish or cancel the new-AOI draw first" : "Edit"}
+                  disabled={isDrawing}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleStartEdit(aoi);
+                  }}
+                >
+                  ✎
+                </button>
                 <button
                   className="icon-button"
                   title="Archive"

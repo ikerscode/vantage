@@ -31,6 +31,26 @@ function tickPosition(sceneDate: string, from: string, to: string): number {
   return Math.min(100, Math.max(0, pos));
 }
 
+// User-resizable timeline panel height (drag the handle on its top edge).
+// Persisted across sessions — the first thing anyone does with a resize
+// handle is set it once to their preference and never think about it again;
+// re-defaulting on every reload would be a small but real annoyance.
+const SCRUBBER_HEIGHT_STORAGE_KEY = "vantage.scrubberHeightPx";
+const SCRUBBER_MIN_HEIGHT = 44;
+const SCRUBBER_MAX_HEIGHT = 420;
+// 60px (from the previous ~50% shrink) + 35%, per direct follow-up feedback.
+const SCRUBBER_DEFAULT_HEIGHT = 81;
+
+function clampScrubberHeight(value: number): number {
+  return Math.min(SCRUBBER_MAX_HEIGHT, Math.max(SCRUBBER_MIN_HEIGHT, value));
+}
+
+function loadStoredScrubberHeight(): number {
+  if (typeof window === "undefined") return SCRUBBER_DEFAULT_HEIGHT;
+  const stored = Number(window.localStorage.getItem(SCRUBBER_HEIGHT_STORAGE_KEY));
+  return Number.isFinite(stored) && stored > 0 ? clampScrubberHeight(stored) : SCRUBBER_DEFAULT_HEIGHT;
+}
+
 export function TemporalScrubber() {
   const mode = useMapStore((s) => s.mode);
   const selectedAoiId = useAoiStore((s) => s.selectedAoiId);
@@ -47,6 +67,35 @@ export function TemporalScrubber() {
   // black/flat color).
   const [dateFrom, setDateFrom] = useState(() => monthsAgoIso(24));
   const [dateTo, setDateTo] = useState(() => todayIso());
+
+  const [scrubberHeight, setScrubberHeight] = useState(loadStoredScrubberHeight);
+
+  // Drag-to-resize (top edge handle). startY/startHeight are captured once
+  // per gesture in this closure — not component state — so the move/up
+  // listeners added here are the exact same function references removed on
+  // mouseup, regardless of how many re-renders (from setScrubberHeight
+  // itself) happen mid-drag.
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = scrubberHeight;
+
+    const handleMove = (moveEvent: MouseEvent) => {
+      // Dragging UP shrinks clientY, which should GROW the panel — it's
+      // anchored to the bottom of the screen, so "up" is "taller".
+      setScrubberHeight(clampScrubberHeight(startHeight + (startY - moveEvent.clientY)));
+    };
+    const handleUp = () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+      setScrubberHeight((h) => {
+        window.localStorage.setItem(SCRUBBER_HEIGHT_STORAGE_KEY, String(h));
+        return h;
+      });
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+  };
 
   const scrubberMode = useAnalysisStore((s) => s.scrubberMode);
   const setScrubberMode = useAnalysisStore((s) => s.setScrubberMode);
@@ -163,86 +212,91 @@ export function TemporalScrubber() {
     const since = analyses.length ? analyses[analyses.length - 1].created_at.slice(0, 10) : monthsAgoIso(1);
     const now = todayIso();
     return (
-      <div className="panel scrubber">
-        {/* key={mode}: forces a real remount when switching Explore/Analyze
-            <-> Monitor (see styles.css's .scrubber-header comment) — without
-            it, React reconciles this same div in place across the branch
-            swap below and the pop-in animation would only ever fire once,
-            on first mount. */}
-        <div className="scrubber-header" key={mode}>
-          <span className="scrubber-title">Timeline</span>
-          <span className="status-value">Monitoring · live</span>
-          {selectedAoiId && <span className="status-value-tertiary">watching AOI since {since}</span>}
-        </div>
-        <div className="scrubber-axis" key={mode}>
-          <div className="scrubber-baseline" />
-          {analyses.map((a) => (
-            <div
-              key={a.id}
-              className="scrubber-watch-dot"
-              style={{ left: `${tickPosition(a.created_at, since, now)}%` }}
-              title={`${a.date_a} → ${a.date_b}: ${a.status}`}
-            />
-          ))}
-          <div className={aoiIsAlert ? "scrubber-now-marker alert" : "scrubber-now-marker"} />
-          <span
-            className={aoiIsAlert ? "scrubber-handle-label alert" : "scrubber-handle-label accent"}
-            style={{ right: 0, left: "auto", transform: "translateX(50%)" }}
-          >
-            NOW
-          </span>
+      <div className="panel scrubber" style={{ height: scrubberHeight }}>
+        <div className="scrubber-resize-handle" onMouseDown={handleResizeStart} title="Drag to resize" />
+        <div className="scrubber-body">
+          {/* key={mode}: forces a real remount when switching Explore/Analyze
+              <-> Monitor (see styles.css's .scrubber-header comment) — without
+              it, React reconciles this same div in place across the branch
+              swap below and the pop-in animation would only ever fire once,
+              on first mount. */}
+          <div className="scrubber-header" key={mode}>
+            <span className="scrubber-title">Timeline</span>
+            <span className="status-value">Monitoring · live</span>
+            {selectedAoiId && <span className="status-value-tertiary">watching AOI since {since}</span>}
+          </div>
+          <div className="scrubber-axis" key={mode}>
+            <div className="scrubber-baseline" />
+            {analyses.map((a) => (
+              <div
+                key={a.id}
+                className="scrubber-watch-dot"
+                style={{ left: `${tickPosition(a.created_at, since, now)}%` }}
+                title={`${a.date_a} → ${a.date_b}: ${a.status}`}
+              />
+            ))}
+            <div className={aoiIsAlert ? "scrubber-now-marker alert" : "scrubber-now-marker"} />
+            <span
+              className={aoiIsAlert ? "scrubber-handle-label alert" : "scrubber-handle-label accent"}
+              style={{ right: 0, left: "auto", transform: "translateX(50%)" }}
+            >
+              NOW
+            </span>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="panel scrubber">
-      <div className="scrubber-header" key={mode}>
-        <span className="scrubber-title">Timeline</span>
-        {scrubberMode === "single" ? (
-          <span className="status-value">{singleDate ?? "no date selected"}</span>
-        ) : (
-          <span className="status-value">
-            {dateA ?? "before"} → {dateB ?? "after"}
-          </span>
-        )}
-        <span className="status-value-tertiary">{scenes.length} scene(s) in range</span>
-        <div className="scrubber-search-row">
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-          <span className="status-value-tertiary">→</span>
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-          <button
-            className={scenesQuery.isFetching ? "tag btn-busy" : "tag"}
-            onClick={handleSearch}
-            disabled={!selectedAoiId || scenesQuery.isFetching}
-          >
-            {scenesQuery.isFetching ? (
-              <>
-                <span className="spinner" />
-                SEARCHING…
-              </>
-            ) : (
-              "SEARCH"
-            )}
-          </button>
+    <div className="panel scrubber" style={{ height: scrubberHeight }}>
+      <div className="scrubber-resize-handle" onMouseDown={handleResizeStart} title="Drag to resize" />
+      <div className="scrubber-body">
+        <div className="scrubber-header" key={mode}>
+          <span className="scrubber-title">Timeline</span>
+          {scrubberMode === "single" ? (
+            <span className="status-value">{singleDate ?? "no date selected"}</span>
+          ) : (
+            <span className="status-value">
+              {dateA ?? "before"} → {dateB ?? "after"}
+            </span>
+          )}
+          <span className="status-value-tertiary">{scenes.length} scene(s) in range</span>
+          <div className="scrubber-search-row">
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+            <span className="status-value-tertiary">→</span>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+            <button
+              className={scenesQuery.isFetching ? "tag btn-busy" : "tag"}
+              onClick={handleSearch}
+              disabled={!selectedAoiId || scenesQuery.isFetching}
+            >
+              {scenesQuery.isFetching ? (
+                <>
+                  <span className="spinner" />
+                  SEARCHING…
+                </>
+              ) : (
+                "SEARCH"
+              )}
+            </button>
+          </div>
+          <div className="scrubber-mode-toggle">
+            <button className={scrubberMode === "single" ? "active" : ""} onClick={() => setScrubberMode("single")}>
+              SINGLE
+            </button>
+            <button
+              className={scrubberMode === "before-after" ? "active" : ""}
+              onClick={() => setScrubberMode("before-after")}
+            >
+              BEFORE / AFTER
+            </button>
+          </div>
         </div>
-        <div className="scrubber-mode-toggle">
-          <button className={scrubberMode === "single" ? "active" : ""} onClick={() => setScrubberMode("single")}>
-            SINGLE
-          </button>
-          <button
-            className={scrubberMode === "before-after" ? "active" : ""}
-            onClick={() => setScrubberMode("before-after")}
-          >
-            BEFORE / AFTER
-          </button>
-        </div>
-      </div>
 
-      {!selectedAoiId && <span className="status-value-tertiary">select an AOI first</span>}
+        {!selectedAoiId && <span className="status-value-tertiary">select an AOI first</span>}
 
-      <div className="scrubber-axis" key={mode}>
+        <div className="scrubber-axis" key={mode}>
         <div className="scrubber-baseline" />
         {scenes.map((scene) => {
           const dateStr = scene.datetime.slice(0, 10);
@@ -310,22 +364,23 @@ export function TemporalScrubber() {
         )}
       </div>
 
-      {mode === "analyze" && (
-        <button
-          className={createAnalysis.isPending ? "tag btn-busy" : "tag"}
-          onClick={handleRunAnalysis}
-          disabled={!dateA || !dateB || createAnalysis.isPending}
-        >
-          {createAnalysis.isPending ? (
-            <>
-              <span className="spinner" />
-              SUBMITTING…
-            </>
-          ) : (
-            "RUN ANALYSIS"
-          )}
-        </button>
-      )}
+        {mode === "analyze" && (
+          <button
+            className={createAnalysis.isPending ? "tag btn-busy" : "tag"}
+            onClick={handleRunAnalysis}
+            disabled={!dateA || !dateB || createAnalysis.isPending}
+          >
+            {createAnalysis.isPending ? (
+              <>
+                <span className="spinner" />
+                SUBMITTING…
+              </>
+            ) : (
+              "RUN ANALYSIS"
+            )}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

@@ -41,6 +41,27 @@ export function useCreateAoi() {
   });
 }
 
+interface UpdateAoiInput {
+  id: string;
+  name?: string;
+  description?: string;
+  // Collection/sensor is deliberately NOT here — fixed for an AOI's
+  // lifetime (see CreateAoiInput's comment); the backend's AOIUpdate schema
+  // doesn't accept it either.
+  geometry?: GeoJSONPolygon;
+}
+
+export function useUpdateAoi() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...input }: UpdateAoiInput) =>
+      apiFetch<AOI>(`/api/aois/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["aois"] });
+    },
+  });
+}
+
 export function useArchiveAoi() {
   const queryClient = useQueryClient();
   return useMutation({

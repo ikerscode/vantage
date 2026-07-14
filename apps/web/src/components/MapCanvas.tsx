@@ -1,4 +1,4 @@
-import { DrawPolygonMode, EditableGeoJsonLayer, ViewMode } from "@deck.gl-community/editable-layers";
+import { DrawPolygonMode, EditableGeoJsonLayer, ModifyMode, ViewMode } from "@deck.gl-community/editable-layers";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { GeoJsonLayer, type Layer } from "deck.gl";
 import maplibregl from "maplibre-gl";
@@ -177,6 +177,9 @@ export function MapCanvas() {
   const draftGeometry = useAoiStore((s) => s.draftGeometry);
   const setDraftGeometry = useAoiStore((s) => s.setDraftGeometry);
   const isDrawing = useAoiStore((s) => s.isDrawing);
+  const editingAoiId = useAoiStore((s) => s.editingAoiId);
+  const editingGeometry = useAoiStore((s) => s.editingGeometry);
+  const setEditingGeometry = useAoiStore((s) => s.setEditingGeometry);
   const selectedAoi = aois?.find((a) => a.id === selectedAoiId);
   const sensor = sensorForCollection(selectedAoi?.collection);
 
@@ -428,6 +431,29 @@ export function MapCanvas() {
     }
   }, [isDrawing]);
 
+  // ModifyMode (reshaping an existing AOI's vertices) is fundamentally a
+  // press-and-drag gesture on a vertex handle — unlike DrawPolygonMode
+  // above, which only ever needs plain clicks, so dragPan staying enabled
+  // there never conflicted with anything. Left enabled here too, a
+  // vertex-drag and MapLibre's own drag-pan fire off the SAME gesture on
+  // the same interleaved canvas at once: the map pans underneath the
+  // vertex you're dragging, so it visibly lags/fights/jumps instead of
+  // tracking the cursor cleanly. This is almost certainly the real source
+  // of "still janky" after the picking-radius/handle-size fix — that fix
+  // was about successfully STARTING a drag; this is about it fighting the
+  // map for the rest of the gesture. Scoped to editingAoiId only —
+  // drawing's own dragPan-stays-on behavior (BRIEF v2, see above) is
+  // untouched.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (editingAoiId) {
+      map.dragPan.disable();
+    } else {
+      map.dragPan.enable();
+    }
+  }, [editingAoiId]);
+
   // Saved AOIs + the in-progress AOI draw layer. Split out from the
   // detections layer below (PERF — see staticVectorLayersRef's comment):
   // these two only change on real AOI/draw edits, never on a pulse tick, so
@@ -440,11 +466,17 @@ export function MapCanvas() {
       id: "saved-aois",
       data: {
         type: "FeatureCollection",
-        features: (aois ?? []).map((aoi) => ({
-          type: "Feature" as const,
-          geometry: aoi.geometry,
-          properties: { id: aoi.id, name: aoi.name },
-        })),
+        // Excludes the AOI currently being reshaped — its live, editable
+        // geometry is drawn by drawLayer below instead, so this doesn't
+        // also render its last-saved (increasingly stale, mid-edit)
+        // geometry underneath/behind it.
+        features: (aois ?? [])
+          .filter((aoi) => aoi.id !== editingAoiId)
+          .map((aoi) => ({
+            type: "Feature" as const,
+            geometry: aoi.geometry,
+            properties: { id: aoi.id, name: aoi.name },
+          })),
       },
       pickable: true,
       stroked: true,
@@ -464,29 +496,65 @@ export function MapCanvas() {
       },
     });
 
+    // Reshaping an existing AOI (editingAoiId set) and drawing a brand-new
+    // one (isDrawing/draftGeometry) are mutually exclusive (see
+    // AOIPanel.tsx's handleStartEdit/the DRAW NEW AOI button's onClick),
+    // so one EditableGeoJsonLayer can serve both — it's just a different
+    // mode/data/callback depending on which (if either) is active.
+    const activeGeometry = editingAoiId ? editingGeometry : draftGeometry;
     const drawLayer = new EditableGeoJsonLayer({
       id: "aoi-draw-layer",
-      data: draftGeometry
+      data: activeGeometry
         ? {
             type: "FeatureCollection",
-            features: [{ type: "Feature", geometry: draftGeometry, properties: {} }],
+            features: [{ type: "Feature", geometry: activeGeometry, properties: {} }],
           }
         : EMPTY_FEATURE_COLLECTION,
-      mode: isDrawing ? new DrawPolygonMode() : new ViewMode(),
-      selectedFeatureIndexes: [],
+      mode: editingAoiId ? new ModifyMode() : isDrawing ? new DrawPolygonMode() : new ViewMode(),
+      // ModifyMode needs its one feature selected to expose draggable vertex
+      // handles; DrawPolygonMode (a brand-new, not-yet-a-feature shape)
+      // doesn't use selection at all.
+      selectedFeatureIndexes: editingAoiId ? [0] : [],
       onEdit: ({ updatedData }) => {
         const feature = updatedData.features[updatedData.features.length - 1];
-        if (feature) setDraftGeometry(feature.geometry as unknown as typeof draftGeometry);
+        if (!feature) return;
+        if (editingAoiId) {
+          setEditingGeometry(feature.geometry as unknown as typeof editingGeometry);
+        } else {
+          setDraftGeometry(feature.geometry as unknown as typeof draftGeometry);
+        }
       },
       getLineColor: ACCENT_LINE,
       getFillColor: ACCENT_FILL,
       lineWidthUnits: "pixels",
       getLineWidth: 1.5,
-      // Vertex handles: 9px accent squares with a glow, per spec.
+      // pickingRadius: deck.gl's hit-testing defaults to near-exact-pixel
+      // precision with this unset — a mouse a couple pixels off a small
+      // handle simply misses, no drag starts at all. This is almost
+      // certainly why reshaping felt "janky, hard to grab": nothing was
+      // actually broken, the grabbable area was just far smaller than the
+      // rendered handle looked. A generous pixel tolerance here is the
+      // single highest-leverage fix for that.
+      pickingRadius: 10,
+      // Vertex handles. The old comment here claimed "9px accent squares"
+      // but the actual radius was 5 — a real, pre-existing mismatch between
+      // intent and code (not something this pass introduced, but worth
+      // fixing while touching this). ModifyMode renders two distinct kinds
+      // of handle: 'existing' (a real vertex — drag to move it) and
+      // 'intermediate' (a midpoint — click to insert a new vertex there).
+      // Both used to render identically, so there was no way to tell drag
+      // targets from insert targets by looking — sized/shaded apart here so
+      // existing vertices read as the primary, easy-to-grab target and
+      // intermediate ones as a secondary, deliberate action.
       editHandlePointRadiusUnits: "pixels",
-      getEditHandlePointRadius: 5,
-      getEditHandlePointColor: [6, 8, 11, 230],
-      getEditHandlePointOutlineColor: ACCENT_LINE,
+      getEditHandlePointRadius: (handle: { properties?: { editHandleType?: string } }) =>
+        handle.properties?.editHandleType === "intermediate" ? 4 : 8,
+      getEditHandlePointColor: (handle: { properties?: { editHandleType?: string } }) =>
+        handle.properties?.editHandleType === "intermediate"
+          ? ([6, 8, 11, 160] as [number, number, number, number])
+          : ([6, 8, 11, 230] as [number, number, number, number]),
+      getEditHandlePointOutlineColor: (handle: { properties?: { editHandleType?: string } }) =>
+        handle.properties?.editHandleType === "intermediate" ? MUTED_LINE : ACCENT_LINE,
       editHandlePointOutline: true,
       editHandlePointStrokeWidth: 1.5,
     });
@@ -499,7 +567,18 @@ export function MapCanvas() {
         ...(detectionsLayerRef.current ? [detectionsLayerRef.current] : []),
       ],
     });
-  }, [aois, selectedAoiId, draftGeometry, isDrawing, setSelectedAoiId, setDraftGeometry, setInspectorTarget]);
+  }, [
+    aois,
+    selectedAoiId,
+    draftGeometry,
+    isDrawing,
+    editingAoiId,
+    editingGeometry,
+    setSelectedAoiId,
+    setDraftGeometry,
+    setEditingGeometry,
+    setInspectorTarget,
+  ]);
 
   // Detections + alert-glow: both driven by the shared pulse level. Isolated
   // from the effect above so a pulse tick (~12x/sec while active) only ever
@@ -737,17 +816,6 @@ export function MapCanvas() {
   return (
     <>
       <div ref={containerRef} className="map-canvas" />
-      {/* Ambient radar-scope decoration (motion-pass brief, effect #3 —
-          reduced scope, see ALERT_GLOW_LINE_RGB's comment and
-          styles.css's .map-radar-decor for why the crosshair/labels were
-          dropped). Viewport-relative, always visible, purely decorative —
-          no geo binding, costs nothing to keep mounted. */}
-      <div className="map-radar-decor" aria-hidden="true">
-        <div className="map-radar-ring" style={{ width: 220, height: 220 }} />
-        <div className="map-radar-ring" style={{ width: 380, height: 380 }} />
-        <div className="map-radar-ring" style={{ width: 560, height: 560 }} />
-        <div className="map-radar-sweep" />
-      </div>
       {showScanSweep && <div className="map-scan-sweep" aria-hidden="true" />}
       {/* BRIEF v2, found for real, repeatedly, across this entire project's
           live testing history: there's no basemap here by design (see

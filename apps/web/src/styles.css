@@ -256,12 +256,6 @@ button {
     opacity: 0;
   }
 }
-/* Ambient scope sweep (effect #3, reduced scope — see .map-radar-decor). */
-@keyframes vg-radar-sweep {
-  to {
-    transform: rotate(360deg);
-  }
-}
 /* Selected-AOI breathing glow (effect #6 — cheap CSS variant, see README's
    option (b): savedAoisLayer in MapCanvas.tsx is a deck.gl canvas layer, so
    CSS can't reach it directly, and a second animated deck.gl layer just for
@@ -454,49 +448,6 @@ button {
   font-size: 11.5px;
   color: var(--text-tertiary);
   line-height: 1.5;
-}
-
-/* ============================================================
-   Map ambient decoration (motion-pass brief, effect #3 — reduced scope)
-   ============================================================
-   Viewport-relative, not geo-anchored (the map has no basemap of its own —
-   see CLAUDE.md's air-gap invariant — so this costs nothing and works
-   air-gapped). Deliberately DROPS the source mockup's center crosshair and
-   invented "SECTOR 14-B" / "R 4.2 KM" labels: a crosshair reads as
-   lock-on/targeting iconography, which CLAUDE.md §5 rules out categorically
-   (see Compass.tsx's existing "no reticle/lock-on iconography" comment) —
-   kept to quiet concentric rings + one slow sweep, purely ambient "the feed
-   is live" texture, no aim point. */
-.map-radar-decor {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1;
-  overflow: hidden;
-}
-.map-radar-ring {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  border: 1px solid var(--hairline);
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-}
-.map-radar-sweep {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 1px;
-  height: 50vmax;
-  margin-left: -0.5px;
-  transform-origin: top center;
-  background: linear-gradient(to bottom, var(--accent), transparent 70%);
-  opacity: 0.4;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .map-radar-sweep {
-    animation: vg-radar-sweep 9s linear infinite;
-  }
 }
 
 /* Scan-sweep (effect #4) — visible only while an analysis is pending/running
@@ -1142,10 +1093,18 @@ button {
   border-right: none;
 }
 
+/* Was a 14%-opacity wash + a 2px inset line — too subtle to read at a
+   glance as "this is the selected mode" vs. "I'm not sure that click did
+   anything" (direct feedback). A solid fill + bold weight + outer glow
+   makes the selected tab unmistakable against the other two, not just
+   technically distinguishable from them. */
 .mode-switcher-segment.active {
   color: var(--accent-bright);
-  background: var(--accent-dim);
-  box-shadow: inset 0 -2px 0 0 var(--accent);
+  background: var(--accent-fill);
+  font-weight: 600;
+  box-shadow:
+    inset 0 -2px 0 0 var(--accent),
+    0 0 10px rgba(63, 184, 212, 0.3);
 }
 
 /* ============================================================
@@ -1580,17 +1539,67 @@ button {
   left: 16px;
   right: 16px;
   bottom: 16px;
-  /* Taller than the reference's 66px: this real build also carries the
-     scene-search date range and the RUN ANALYSIS trigger inline (the
-     reference's mock scrubber only ever showed header+axis), so the fixed
-     66px clipped real content via the panel's overflow:hidden. */
-  height: 112px;
+  /* Height is user-controlled (see .scrubber-resize-handle / the
+     scrubberHeight state in TemporalScrubber.tsx).
+     overflow: visible here is deliberate and overrides .panel's inherited
+     overflow:hidden — the resize handle and size presets are positioned
+     OUTSIDE this box on purpose (negative top offsets, floating above the
+     panel's edge), and any non-visible overflow on either axis clips
+     those per spec (setting overflow-y alone still computes overflow-x to
+     auto, not visible, so it was clipping in both directions). The actual
+     scrolling now happens on .scrubber-body below instead, so this box
+     stays a pure positioning/sizing container with nothing of its own to
+     clip. */
+  overflow: visible;
   display: flex;
   flex-direction: column;
-  padding: 9px 18px 10px;
-  gap: 7px;
   z-index: 4;
   animation: vg-chrome-in 500ms var(--ease-assemble) 320ms both;
+}
+
+/* The actual scrollable/padded content region. Split out from .scrubber
+   itself for exactly one reason: overflow:auto here (not on .scrubber)
+   means content that doesn't fit the chosen height scrolls, while the
+   resize handle/presets — siblings of this, direct children of .scrubber —
+   stay outside its clipping and remain visible/clickable above the panel's
+   top edge. */
+.scrubber-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Explicit, not left to default: per spec, setting only overflow-y makes
+     overflow-x compute to auto too (not visible) — without this, any row
+     too wide for the panel (the header's title+dates+search+mode-toggle
+     all share one unwrapped flex line) grew a horizontal scrollbar along
+     the bottom. Vertical scrolling only; horizontal overflow just clips. */
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 16px 7px;
+  gap: 5px;
+}
+
+/* Drag handle — top edge of the timeline panel, lets its height be set by
+   hand (see scrubberHeight in TemporalScrubber.tsx). Positioned to overlap
+   the panel's own top border rather than taking up flex space inside it. */
+.scrubber-resize-handle {
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 48px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--hairline-strong);
+  cursor: ns-resize;
+  z-index: 1;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    width var(--dur-fast) var(--ease-out);
+}
+.scrubber-resize-handle:hover {
+  background: var(--accent);
+  width: 64px;
 }
 
 @media (prefers-reduced-motion: reduce) {
