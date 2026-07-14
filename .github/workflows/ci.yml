@@ -18,6 +18,15 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# BRIEF v1.9: least privilege, explicit rather than inherited. None of this
+# workflow's jobs (test, frontend, security-scan, build-desktop) write to the
+# repo, its packages, or anything else — they build, test, and scan. Pinning
+# read-only here overrides whatever the repository/account-level default
+# happens to be (which can silently be read+write), so a future job can't
+# quietly gain write access just by existing.
+permissions:
+  contents: read
+
 env:
   PYTHON_VERSION: "3.11"
   NODE_VERSION: "20"

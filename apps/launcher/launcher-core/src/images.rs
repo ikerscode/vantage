@@ -27,6 +27,7 @@
 //! actionable message, not a silent Ok(false) that leaves the caller to
 //! discover the problem downstream.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -34,16 +35,83 @@ use std::process::Output;
 
 use crate::runtime_detect::{external_tool_command, ContainerRuntime};
 
-/// (local tag docker-compose.prod.yml's defaults expect, GHCR image
-/// pulled and re-tagged to match it) — re-tagging after pull means nothing
-/// downstream needs to know or care which source the images actually came
-/// from.
+/// (local tag docker-compose.prod.yml's defaults expect, GHCR repo — WITHOUT
+/// a tag; see `pull_reference`). The image is pulled by immutable @sha256
+/// digest wherever a manifest is available (release builds), then re-tagged
+/// to the local tag so nothing downstream needs to know or care which source
+/// — or which digest — the images actually came from.
 pub const REQUIRED_IMAGES: &[(&str, &str)] = &[
-    ("vantage-api:1.0.0", "ghcr.io/ikerscode/vantage-api:1.0.0"),
-    ("vantage-tiler:1.0.0", "ghcr.io/ikerscode/vantage-tiler:1.0.0"),
-    ("vantage-inference:1.0.0", "ghcr.io/ikerscode/vantage-inference:1.0.0"),
-    ("vantage-pgstac-migrate:1.0.0", "ghcr.io/ikerscode/vantage-pgstac-migrate:1.0.0"),
+    ("vantage-api:1.0.0", "ghcr.io/ikerscode/vantage-api"),
+    ("vantage-tiler:1.0.0", "ghcr.io/ikerscode/vantage-tiler"),
+    ("vantage-inference:1.0.0", "ghcr.io/ikerscode/vantage-inference"),
+    ("vantage-pgstac-migrate:1.0.0", "ghcr.io/ikerscode/vantage-pgstac-migrate"),
 ];
+
+/// The immutable image tag this launcher expects (re-pushed each release —
+/// see release.yml's publish-images). Used as the pull reference ONLY as a
+/// fallback for local/dev builds with no digest manifest baked in; release
+/// builds pin to an @sha256 digest instead (BRIEF v1.9 #1).
+const VANTAGE_IMAGE_TAG: &str = "1.0.0";
+
+/// image short-name ("vantage-api") -> immutable content digest
+/// ("sha256:...") as published to GHCR by release.yml's publish-images job
+/// and written to that release's `image-digests.json` asset.
+///
+/// Fetched at RUNTIME, not baked in at compile time, for an unavoidable
+/// ordering reason (BRIEF v1.9 #1): the launcher binary is built in
+/// release.yml's `release` job, and the images are pushed — so their digests
+/// first exist — only in the later `publish-images` job (`needs: release`).
+/// No digest can possibly be known when this crate compiles. The build bakes
+/// in the manifest's URL instead (known at compile time — it's this release's
+/// own tag), and the real digests are read from it at install time, by which
+/// point publish-images has long since finished.
+pub type DigestManifest = HashMap<String, String>;
+
+/// Resolves the digest manifest for the thin/online (registry) pull path.
+/// Release builds have `VANTAGE_IMAGE_DIGEST_MANIFEST_URL` baked in (set by
+/// release.yml when it compiles the launcher) → the manifest is REQUIRED, and
+/// a fetch failure is a hard error rather than a silent downgrade to the
+/// mutable tag (a machine that can reach ghcr.io to pull images can reach the
+/// same release's github.com asset). Local/dev builds have no URL → `None`,
+/// and `pull_reference` falls back to the tag (these builds are never shipped).
+fn resolve_digest_manifest() -> io::Result<Option<DigestManifest>> {
+    match option_env!("VANTAGE_IMAGE_DIGEST_MANIFEST_URL") {
+        Some(url) if !url.is_empty() => Ok(Some(fetch_digest_manifest(url)?)),
+        _ => Ok(None),
+    }
+}
+
+fn fetch_digest_manifest(url: &str) -> io::Result<DigestManifest> {
+    let body = ureq::get(url)
+        .timeout(std::time::Duration::from_secs(30))
+        .call()
+        .map_err(|e| io::Error::other(format!("couldn't fetch the image digest manifest from {url}: {e}")))?
+        .into_string()
+        .map_err(|e| io::Error::other(format!("couldn't read the image digest manifest from {url}: {e}")))?;
+    serde_json::from_str(&body).map_err(|e| {
+        io::Error::other(format!(
+            "image digest manifest at {url} was not the expected JSON object of image->sha256 digests: {e}"
+        ))
+    })
+}
+
+/// The reference to actually `pull` for one image: its immutable @sha256
+/// digest when the manifest has an entry, the mutable :tag only when there is
+/// no manifest at all (dev builds). Fails closed — never silently downgrades
+/// to the tag — if a manifest is present but missing this specific image.
+fn pull_reference(ghcr_repo: &str, manifest: Option<&DigestManifest>) -> Result<String, String> {
+    let short_name = ghcr_repo.rsplit('/').next().unwrap_or(ghcr_repo);
+    match manifest {
+        Some(m) => match m.get(short_name) {
+            Some(digest) => Ok(format!("{ghcr_repo}@{digest}")),
+            None => Err(format!(
+                "the image digest manifest had no entry for {short_name} — refusing to fall back \
+                 to the mutable {ghcr_repo}:{VANTAGE_IMAGE_TAG} tag (BRIEF v1.9 #1)"
+            )),
+        },
+        None => Ok(format!("{ghcr_repo}:{VANTAGE_IMAGE_TAG}")),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageSource {
@@ -111,16 +179,22 @@ pub fn ensure_images_loaded(
         return Ok(ImageSource::Tarball);
     }
 
-    // No bundled tarball anywhere — thin/online installer path.
-    for (local_tag, ghcr_ref) in REQUIRED_IMAGES {
-        let pull = run_pull(runtime, ghcr_ref)?;
+    // No bundled tarball anywhere — thin/online installer path. Pull by
+    // immutable @sha256 digest (BRIEF v1.9 #1) wherever a digest manifest is
+    // available (release builds), instead of the mutable :1.0.0 tag; see
+    // resolve_digest_manifest / pull_reference. Resolved once, up front, so a
+    // manifest problem fails before any image is pulled.
+    let manifest = resolve_digest_manifest()?;
+    for (local_tag, ghcr_repo) in REQUIRED_IMAGES {
+        let pull_ref = pull_reference(ghcr_repo, manifest.as_ref()).map_err(io::Error::other)?;
+        let pull = run_pull(runtime, &pull_ref)?;
         if !pull.status.success() {
-            return Err(io::Error::other(actionable_no_images_error(ghcr_ref, &pull)));
+            return Err(io::Error::other(actionable_no_images_error(&pull_ref, &pull)));
         }
-        let tag = run_tag(runtime, ghcr_ref, local_tag)?;
+        let tag = run_tag(runtime, &pull_ref, local_tag)?;
         if !tag.status.success() {
             return Err(io::Error::other(format!(
-                "pulled {ghcr_ref} but couldn't tag it as {local_tag}: {}",
+                "pulled {pull_ref} but couldn't tag it as {local_tag}: {}",
                 String::from_utf8_lossy(&tag.stderr)
             )));
         }
@@ -240,6 +314,66 @@ mod tests {
         let data_dir = tempfile::tempdir().unwrap();
         let candidates = vec![data_dir.path().join("a.tar"), data_dir.path().join("b.tar")];
         assert_eq!(select_tarball(&candidates), None);
+    }
+
+    #[test]
+    fn pull_reference_pins_to_digest_when_the_manifest_has_the_image() {
+        // The whole point of BRIEF v1.9 #1: a release build resolves each
+        // image to its immutable content digest, not the mutable :1.0.0 tag.
+        let mut manifest = DigestManifest::new();
+        manifest.insert("vantage-api".to_string(), "sha256:deadbeef".to_string());
+        assert_eq!(
+            pull_reference("ghcr.io/ikerscode/vantage-api", Some(&manifest)).unwrap(),
+            "ghcr.io/ikerscode/vantage-api@sha256:deadbeef"
+        );
+    }
+
+    #[test]
+    fn pull_reference_fails_closed_when_manifest_is_present_but_missing_the_image() {
+        // A manifest that exists but doesn't list this image must NOT silently
+        // fall back to the mutable tag — that would defeat the pin mid-release
+        // (e.g. a manifest generated before a newly-added image existed).
+        let manifest = DigestManifest::new(); // present, but empty
+        let err = pull_reference("ghcr.io/ikerscode/vantage-tiler", Some(&manifest)).unwrap_err();
+        assert!(err.contains("vantage-tiler"), "error should name the missing image");
+        assert!(err.contains("refusing to fall back"), "error should state it fails closed");
+    }
+
+    #[test]
+    fn pull_reference_falls_back_to_the_tag_only_without_any_manifest() {
+        // Local/dev builds (no VANTAGE_IMAGE_DIGEST_MANIFEST_URL baked in)
+        // have no manifest and are never distributed — the tag is fine there.
+        assert_eq!(
+            pull_reference("ghcr.io/ikerscode/vantage-inference", None).unwrap(),
+            "ghcr.io/ikerscode/vantage-inference:1.0.0"
+        );
+    }
+
+    #[test]
+    fn digest_manifest_parses_the_shape_release_yml_publishes() {
+        // Guards the contract between release.yml's publish-images (which
+        // writes this JSON) and fetch_digest_manifest (which reads it): a flat
+        // object of image short-name -> "sha256:..." string.
+        let json = r#"{"vantage-api":"sha256:aaa","vantage-tiler":"sha256:bbb"}"#;
+        let manifest: DigestManifest = serde_json::from_str(json).unwrap();
+        assert_eq!(manifest.get("vantage-api").unwrap(), "sha256:aaa");
+        assert_eq!(
+            pull_reference("ghcr.io/ikerscode/vantage-api", Some(&manifest)).unwrap(),
+            "ghcr.io/ikerscode/vantage-api@sha256:aaa"
+        );
+    }
+
+    #[test]
+    fn required_images_ghcr_repos_are_tagless_so_a_digest_or_tag_can_be_appended() {
+        // pull_reference builds "<repo>@<digest>" or "<repo>:<tag>" — either
+        // only produces a valid reference if the repo carries neither itself.
+        for (_, ghcr_repo) in REQUIRED_IMAGES {
+            assert!(!ghcr_repo.contains('@'), "{ghcr_repo} must not carry a digest");
+            assert!(
+                !ghcr_repo.rsplit('/').next().unwrap().contains(':'),
+                "{ghcr_repo} must not carry a tag"
+            );
+        }
     }
 
     #[test]

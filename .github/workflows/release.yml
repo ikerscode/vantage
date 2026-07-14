@@ -23,6 +23,16 @@ jobs:
       matrix:
         platform: [ubuntu-22.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.platform }}
+    # BRIEF v1.9 #1: bake THIS release's image-digest-manifest URL into the
+    # launcher at compile time (launcher-core/src/images.rs reads it via
+    # option_env!). Only the URL is known now — the digests it points at don't
+    # exist until publish-images (needs: release) pushes the images later and
+    # uploads image-digests.json to this same release. The launcher fetches
+    # the real digests from here at install time, by which point that upload
+    # has long since happened. The URL is the standard release-asset download
+    # path for this tag.
+    env:
+      VANTAGE_IMAGE_DIGEST_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/image-digests.json
     steps:
       - uses: actions/checkout@v4
 
@@ -208,12 +218,34 @@ jobs:
       # these 4 packages needs a one-time "make public" click (or API call
       # with a classic PAT) before an anonymous thin-installer pull will
       # actually succeed — this push alone is not sufficient on its own.
-      - name: Push production images to GHCR (thin/online installer path)
+      # BRIEF v1.9 #1: push each image AND record the immutable sha256 digest
+      # GHCR assigned it, into image-digests.json. The launcher (built by the
+      # `release` job with this release's manifest URL baked in) fetches this
+      # at install time and pulls image@sha256:<digest> instead of the mutable
+      # :1.0.0 tag — so a later retag of that tag can't be silently trusted by
+      # a thin-install. Generating it HERE, right after each push, is the only
+      # point the real digests exist and can't drift from what was published.
+      - name: Push production images to GHCR + record their immutable digests
         run: |
+          digests='{}'
           for img in vantage-api vantage-tiler vantage-inference vantage-pgstac-migrate; do
             docker tag "$img:1.0.0" "ghcr.io/ikerscode/$img:1.0.0"
             docker push "ghcr.io/ikerscode/$img:1.0.0"
+            digest="$(docker inspect --format='{{index .RepoDigests 0}}' "ghcr.io/ikerscode/$img:1.0.0" | sed 's/.*@//')"
+            case "$digest" in
+              sha256:*) : ;;
+              *) echo "failed to resolve a sha256 digest for $img (got '$digest')" >&2; exit 1 ;;
+            esac
+            digests="$(printf '%s' "$digests" | jq --arg k "$img" --arg v "$digest" '. + {($k): $v}')"
           done
+          printf '%s\n' "$digests" > image-digests.json
+          echo "published image digests:"
+          cat image-digests.json
+
+      - name: Attach image-digests.json to this release (BRIEF v1.9 #1)
+        run: gh release upload "${{ github.ref_name }}" image-digests.json --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # BRIEF v1.6: the actual BRIEF v1.3 §12 acceptance test — "install on a
   # clean machine, cut network access, launch, confirm the demo AOI renders
@@ -226,6 +258,13 @@ jobs:
   airgap-acceptance-test:
     needs: [release, publish-images]
     runs-on: ubuntu-22.04
+    # BRIEF v1.9: least privilege. This job downloads already-published
+    # release assets and runs them on a clean runner — it never writes to the
+    # repo or its packages. An explicit read-only override, since the
+    # top-level `permissions: contents: write` (needed by `release`) would
+    # otherwise be inherited here too.
+    permissions:
+      contents: read
     steps:
       # Only for scripts/smoke.sh's already-correct, already-proven tile-
       # fetch logic below (real z/x/y math, no hardcoded STAC item IDs) —
@@ -415,6 +454,11 @@ jobs:
   thin-installer-acceptance-test:
     needs: [release, publish-images]
     runs-on: ubuntu-22.04
+    # BRIEF v1.9: least privilege. Downloads the installer release asset and
+    # pulls the (public) GHCR images anonymously — no repo/package writes.
+    # Explicit read-only override of the inherited top-level write scope.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 

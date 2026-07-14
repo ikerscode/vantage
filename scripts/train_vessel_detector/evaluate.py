@@ -28,7 +28,11 @@ def build_model() -> torch.nn.Module:
     model = fasterrcnn_resnet50_fpn(weights=None, weights_backbone=None)
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, 2)
-    model.load_state_dict(torch.load(CHECKPOINT_PATH, map_location="cpu"))
+    # weights_only=True (SEC, BRIEF v1.9): plain state_dict of tensors, so
+    # functionally identical, but avoids the pickle arbitrary-code path. Kept
+    # in lockstep with the inference backend's own load site
+    # (services/inference/app/models/torchvision_fasterrcnn_vessel.py).
+    model.load_state_dict(torch.load(CHECKPOINT_PATH, map_location="cpu", weights_only=True))
     model.eval()
     model.to(DEVICE)
     return model
