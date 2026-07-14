@@ -28,6 +28,7 @@ def create_aoi(
         name=payload.name,
         description=payload.description,
         geom=geojson_to_wkb(payload.geometry),
+        collection=payload.collection,
     )
     db.add(aoi)
     db.commit()

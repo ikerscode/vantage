@@ -1,0 +1,63 @@
+# Optional GPU passthrough for services/inference -- NOT applied by default
+# (see docker-compose.yml/docker-compose.prod.yml, which stay CPU-only and
+# must keep working on any machine with no GPU at all, including CI). Opt in
+# explicitly as a compose override:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+#   podman-compose -f docker-compose.yml -f docker-compose.gpu.yml up
+#
+# Host prerequisites (neither of these is installed automatically):
+#   1. An NVIDIA driver new enough to report CUDA 12.6+ in `nvidia-smi`
+#      (driver >= 560.x) -- this is a host-level driver, not a container
+#      concern.
+#   2. nvidia-container-toolkit, configured for your container runtime
+#      (`sudo nvidia-ctk runtime configure --runtime=docker` or
+#      `--runtime=podman`, then restart the daemon/socket). This is the
+#      piece that actually lets a container see the GPU at all; without it,
+#      the `deploy.resources.reservations.devices` block below just fails
+#      the container at startup with no device found.
+#
+# This overlay covers the DEV compose path (docker-compose.yml, which builds
+# services/inference's image at `compose up` time) -- it sets the Dockerfile's
+# INFERENCE_VARIANT build arg so that build actually installs the CUDA torch
+# wheel (requirements.cuda.lock.txt), not just requests a GPU device for the
+# default CPU-only image (which would attach a GPU to a container that never
+# calls into it). For the PACKAGED/prod path (docker-compose.prod.yml, which
+# only ever runs a prebuilt `image:`, never `build:`), there is no image-build
+# step in compose to hook -- build the CUDA-variant image once, ahead of
+# time, with:
+#   docker build --build-arg INFERENCE_VARIANT=cuda \
+#     -f services/inference/Dockerfile -t vantage-inference:cuda .
+# then set VANTAGE_INFERENCE_IMAGE=vantage-inference:cuda in that
+# environment's .env before applying this same override file's `deploy` +
+# `environment` block on top of docker-compose.prod.yml.
+#
+# NOT independently verified end-to-end in this sandbox: no container
+# runtime + GPU passthrough are available together here (see the Dockerfile's
+# identical caveat on requirements.cuda.lock.txt). The lockfile's wheel
+# resolution is real and hash-verified; the runtime device-passthrough
+# behavior below follows Docker/nvidia-container-toolkit's documented
+# contract but hasn't been exercised against a live GPU container.
+#
+# One more unverified-here edge: docker-compose.yml's `inference` service
+# inherits the shared *hardened anchor (read_only: true, only /tmp writable).
+# NVIDIA's driver-level PTX JIT cache (separate from this image's own
+# TORCH_HOME, which is baked in read-only at build time and never written to
+# again) normally lives under a user cache dir -- if CUDA insists on writing
+# it somewhere other than /tmp on first run, expect a slower first call at
+# worst, not a hard failure (model inference itself doesn't need write
+# access), but this hasn't been confirmed against a live GPU container.
+services:
+  inference:
+    build:
+      args:
+        INFERENCE_VARIANT: cuda
+    environment:
+      DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

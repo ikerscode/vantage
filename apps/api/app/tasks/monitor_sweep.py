@@ -4,15 +4,16 @@ from datetime import date, datetime, timedelta, timezone
 from croniter import CroniterBadCronError, croniter
 
 from app.core.celery_app import celery_app
-from app.core.config import settings
 from app.db.session import SessionLocal
 from app.imagery.factory import get_imagery_source
+from app.imagery.sensor import SensorType, default_change_threshold_for, sensor_for_collection
 from app.models.aoi import AOI
 from app.models.analysis_result import AnalysisResult, AnalysisStatus
 from app.models.event import Event
 from app.models.monitor import Monitor
 from app.schemas.geo import wkb_to_geojson
 from app.services.change_detection_pipeline import ChangeDetectionError, execute_change_detection
+from app.services.detection_pipeline import run_placeholder_detection
 from app.services.events_pubsub import publish_event
 
 logger = logging.getLogger(__name__)
@@ -27,12 +28,12 @@ def _is_due(monitor: Monitor, now: datetime) -> bool:
     return croniter(monitor.schedule, base).get_next(datetime) <= now
 
 
-def _latest_scene_date(imagery, geometry: dict, since: date, today: date) -> date | None:
+def _latest_scene_date(imagery, geometry: dict, since: date, today: date, collection: str) -> date | None:
     scenes = imagery.search(
         geometry=geometry,
         date_from=since,
         date_to=today,
-        collections=[settings.stac_default_collection],
+        collections=[collection],
     )
     if not scenes:
         return None
@@ -40,15 +41,24 @@ def _latest_scene_date(imagery, geometry: dict, since: date, today: date) -> dat
     return datetime.fromisoformat(latest.datetime).date()
 
 
+def _should_run_detection(monitor: Monitor, sensor: SensorType, changed_pixel_count: int) -> bool:
+    """Whether app.services.detection_pipeline.run_placeholder_detection
+    should run for this sweep result: only when a real change was found (not
+    every sweep tick), the monitor has opted in (detect_on_change), and the
+    AOI is optical (no honest SAR detector exists yet — see
+    detection_pipeline.py's module docstring)."""
+    return changed_pixel_count > 0 and monitor.detect_on_change and sensor is SensorType.OPTICAL
+
+
 def _resolve_comparison_dates(
-    monitor: Monitor, imagery, geometry: dict, today: date
+    monitor: Monitor, imagery, geometry: dict, today: date, collection: str
 ) -> tuple[date | None, date | None]:
     """Returns (date_a, latest_scene_date). date_a is None when there's nothing
     yet to compare the latest scene against (rolling comparison with no prior
     last_scene_date, and no fixed baseline_date configured) — the sweep still
     records latest_scene_date so the *next* sweep has a comparison point."""
     since = monitor.last_scene_date or (today - timedelta(days=SEED_LOOKBACK_DAYS))
-    latest_date = _latest_scene_date(imagery, geometry, since, today)
+    latest_date = _latest_scene_date(imagery, geometry, since, today, collection)
     if latest_date is None:
         return None, None
 
@@ -91,7 +101,7 @@ def sweep_monitors() -> None:
             geometry = wkb_to_geojson(aoi.geom)
 
             date_a, latest_scene_date = _resolve_comparison_dates(
-                monitor, imagery, geometry, now.date()
+                monitor, imagery, geometry, now.date(), aoi.collection
             )
             monitor.last_run_at = now
 
@@ -103,7 +113,8 @@ def sweep_monitors() -> None:
                 session.commit()
                 continue
 
-            threshold = monitor.threshold or settings.change_detection_default_threshold
+            sensor = sensor_for_collection(aoi.collection)
+            threshold = monitor.threshold or default_change_threshold_for(sensor)
             analysis = AnalysisResult(
                 aoi_id=monitor.aoi_id,
                 monitor_id=monitor.id,
@@ -127,7 +138,27 @@ def sweep_monitors() -> None:
             session.commit()
 
             changed_pixel_count = (analysis.stats or {}).get("changed_pixel_count", 0)
+
+            # BRIEF v2: a monitor that only ever reports "something changed"
+            # forces an analyst to separately run Analyze/detections by hand
+            # to see WHAT changed -- run object detection automatically, but
+            # only when there's a real change to characterize (not every
+            # sweep tick) and only for optical AOIs (see
+            # detection_pipeline.run_placeholder_detection's docstring for
+            # why SAR is excluded: no honest detector exists for it yet).
+            if _should_run_detection(monitor, sensor, changed_pixel_count):
+                try:
+                    run_placeholder_detection(session, analysis)
+                except Exception:
+                    session.rollback()
+                    logger.exception(
+                        "auto-detection-on-change failed for analysis %s (monitor %s)",
+                        analysis.id,
+                        monitor.id,
+                    )
+
             if changed_pixel_count > 0:
+                metric_unit = "log-ratio dB" if sensor is SensorType.SAR else "NDVI-diff"
                 event = Event(
                     monitor_id=monitor.id,
                     aoi_id=monitor.aoi_id,
@@ -136,7 +167,7 @@ def sweep_monitors() -> None:
                     threshold=threshold,
                     summary=(
                         f"Change detected for AOI {monitor.aoi_id}: "
-                        f"{changed_pixel_count} pixel(s) exceeded NDVI-diff threshold "
+                        f"{changed_pixel_count} pixel(s) exceeded {metric_unit} threshold "
                         f"{threshold} between {date_a.isoformat()} and {latest_scene_date.isoformat()}."
                     ),
                 )

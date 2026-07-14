@@ -2,14 +2,17 @@ import { create } from "zustand";
 
 import type { StacItemSummary } from "../api/types";
 
-// Opacity is tracked for all three rasters, but only true_color/ndvi are
-// "base" layers (mutually exclusive, always exactly one on). Change is an
-// OVERLAY that stacks on top of whichever base is showing — see BaseRasterLayerId.
-export type RasterLayerId = "true_color" | "ndvi" | "change";
+// Opacity is tracked for every raster, but only the base layers are
+// mutually exclusive (exactly one on at a time). Change is an OVERLAY that
+// stacks on top of whichever base is showing — see BaseRasterLayerId.
+// sar_amplitude/sar_false_color are SAR AOIs' equivalent of true_color/ndvi
+// (see lib/sensor.ts) — an AOI only ever offers one pair or the other, never
+// all four at once (LayersControl filters by the selected AOI's collection).
+export type RasterLayerId = "true_color" | "ndvi" | "sar_amplitude" | "sar_false_color" | "change";
 // The base imagery layer. Exactly one is always active so real imagery stays
 // visible underneath the Change/Detections overlays (a live request: selecting
 // Change must NOT blank the map — the imagery has to stay on).
-export type BaseRasterLayerId = "true_color" | "ndvi";
+export type BaseRasterLayerId = "true_color" | "ndvi" | "sar_amplitude" | "sar_false_color";
 export type ScrubberMode = "single" | "before-after";
 
 export type InspectorTarget = {
@@ -67,7 +70,7 @@ export const useAnalysisStore = create<AnalysisState>((set) => ({
   // base is always active so the map is never left blank while an overlay is on.
   activeRasterLayer: "true_color",
   setActiveRasterLayer: (layer) => set({ activeRasterLayer: layer }),
-  rasterOpacity: { true_color: 1, ndvi: 0.8, change: 0.75 },
+  rasterOpacity: { true_color: 1, ndvi: 0.8, sar_amplitude: 1, sar_false_color: 0.85, change: 0.75 },
   setRasterOpacity: (layer, opacity) =>
     set((state) => ({ rasterOpacity: { ...state.rasterOpacity, [layer]: opacity } })),
   changeVisible: false,

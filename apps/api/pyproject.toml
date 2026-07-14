@@ -25,6 +25,12 @@ dependencies = [
     "pyjwt~=2.9",
     "httpx~=0.27",
     "croniter~=2.0",
+    # Not imported directly by apps/api code -- packages/geo's vantage_geo.sar
+    # (SAR despeckling) needs it, and packages/geo is installed --no-deps in
+    # the Dockerfile (see its comment), so this lockfile is where its
+    # transitive dependency actually gets pinned/hash-verified, same as
+    # rasterio above.
+    "scipy~=1.13",
     "pillow~=12.2",  # 10.4.0 had 6 known CVEs (pip-audit, CI security-scan job) — 12.2.0+ fixes all of them
     # BRIEF v2: closes SECURITY_FIXES_REPORT.md's one explicitly-flagged
     # remaining gap ("Rate limiting (SlowAPI) — Not done"). See

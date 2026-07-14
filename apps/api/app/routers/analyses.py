@@ -8,7 +8,9 @@ from app.core.config import settings
 from app.core.limiter import limiter
 from app.core.security import get_current_user
 from app.db.session import get_db
+from app.imagery.sensor import default_change_threshold_for, sensor_for_collection
 from app.models.analysis_result import AnalysisResult, AnalysisStatus
+from app.models.aoi import AOI
 from app.schemas.analysis_result import AnalysisCreate, AnalysisRead
 from app.schemas.auth import UserClaims
 from app.tasks.change_detection import run_change_detection
@@ -35,11 +37,19 @@ def create_analysis(
     db: Session = Depends(get_db),
     _user: UserClaims = Depends(get_current_user),
 ) -> AnalysisRead:
+    aoi = db.get(AOI, payload.aoi_id)
+    if aoi is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="AOI not found")
+
+    # NDVI-diff and SAR log-ratio dB are different units sharing one
+    # threshold field -- each sensor gets its own sensible default rather
+    # than one number doing double duty (see app/imagery/sensor.py).
+    default_threshold = default_change_threshold_for(sensor_for_collection(aoi.collection))
     analysis = AnalysisResult(
         aoi_id=payload.aoi_id,
         date_a=payload.date_a,
         date_b=payload.date_b,
-        threshold=payload.threshold or settings.change_detection_default_threshold,
+        threshold=payload.threshold or default_threshold,
         status=AnalysisStatus.PENDING.value,
     )
     db.add(analysis)

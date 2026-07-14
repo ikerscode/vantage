@@ -8,9 +8,9 @@ from rasterio.warp import reproject, transform_bounds
 from shapely.geometry import box, shape
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.imagery.base import ImagerySource, SceneMetadata
 from app.imagery.factory import get_imagery_source
+from app.imagery.sensor import SensorType, sensor_for_collection
 from app.models.aoi import AOI
 from app.models.analysis_result import AnalysisResult, AnalysisStatus
 from app.schemas.geo import wkb_to_geojson
@@ -88,7 +88,7 @@ def _read_bands(
     return red, nir, scl, window_transform, crs
 
 
-def _align_to_reference(
+def align_to_reference(
     array: np.ndarray,
     src_transform: Affine,
     src_crs: object,
@@ -97,7 +97,9 @@ def _align_to_reference(
     ref_shape: tuple[int, int],
 ) -> np.ndarray:
     """Reproject onto the reference grid if CRS/transform/shape differ (date B
-    landed on a different MGRS tile than date A)."""
+    landed on a different MGRS tile than date A). Sensor-agnostic (plain
+    array/transform/CRS in, aligned array out) — shared by both the optical
+    and SAR pipelines, not just this module's own optical one."""
     if src_crs == ref_crs and src_transform == ref_transform and array.shape == ref_shape:
         return array
     aligned = np.zeros(ref_shape, dtype=array.dtype)
@@ -114,16 +116,32 @@ def _align_to_reference(
 
 
 def execute_change_detection(session: Session, analysis: AnalysisResult) -> None:
-    """The real change-detection pipeline logic — takes a plain Session so
-    it's unit-testable without Celery. The Celery task in
-    app.tasks.change_detection is a thin wrapper around this."""
+    """Dispatches to the optical (NDVI-diff) or SAR (log-ratio dB) pipeline
+    based on the AOI's collection (app/imagery/sensor.py) — takes a plain
+    Session so it's unit-testable without Celery. The Celery tasks in
+    app.tasks.change_detection / app.tasks.monitor_sweep are thin wrappers
+    around this. The SAR pipeline is imported lazily (inside the branch, not
+    at module level) because it imports pick_best_scene/align_to_reference/
+    ChangeDetectionError back from this module — a top-level import would be
+    circular."""
     aoi = session.get(AOI, analysis.aoi_id)
     if aoi is None:
         raise ChangeDetectionError(f"AOI {analysis.aoi_id} not found")
 
+    if sensor_for_collection(aoi.collection) is SensorType.SAR:
+        from app.services.sar_change_detection_pipeline import execute_sar_change_detection
+
+        return execute_sar_change_detection(session, analysis, aoi)
+    return _execute_optical_change_detection(session, analysis, aoi)
+
+
+def _execute_optical_change_detection(session: Session, analysis: AnalysisResult, aoi: AOI) -> None:
+    """NDVI-diff change detection — the original pipeline logic, now a named
+    sensor-specific implementation behind execute_change_detection's
+    dispatcher rather than the only pipeline there is."""
     geometry = wkb_to_geojson(aoi.geom)
     imagery = get_imagery_source()
-    collection = settings.stac_default_collection
+    collection = aoi.collection
 
     analysis.status = AnalysisStatus.RUNNING.value
     session.commit()
@@ -134,9 +152,9 @@ def execute_change_detection(session: Session, analysis: AnalysisResult) -> None
     red_a, nir_a, scl_a, transform_a, crs_a = _read_bands(scene_a, geometry)
     red_b, nir_b, scl_b, transform_b, crs_b = _read_bands(scene_b, geometry)
 
-    red_b = _align_to_reference(red_b, transform_b, crs_b, transform_a, crs_a, red_a.shape)
-    nir_b = _align_to_reference(nir_b, transform_b, crs_b, transform_a, crs_a, nir_a.shape)
-    scl_b = _align_to_reference(scl_b, transform_b, crs_b, transform_a, crs_a, scl_a.shape)
+    red_b = align_to_reference(red_b, transform_b, crs_b, transform_a, crs_a, red_a.shape)
+    nir_b = align_to_reference(nir_b, transform_b, crs_b, transform_a, crs_a, nir_a.shape)
+    scl_b = align_to_reference(scl_b, transform_b, crs_b, transform_a, crs_a, scl_a.shape)
 
     ndvi_a = compute_ndvi(nir_a, red_a)
     ndvi_b = compute_ndvi(nir_b, red_b)

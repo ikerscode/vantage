@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.imagery.factory import get_imagery_source
+from app.imagery.sensor import SensorType, sensor_for_collection
 from app.models.aoi import AOI
 from app.models.analysis_result import AnalysisResult
 from app.models.detection import Detection
@@ -66,14 +67,29 @@ def _chip_to_png_bytes(chip: np.ndarray) -> bytes:
     return buffer.getvalue()
 
 
-def _detect_chip(png_bytes: bytes) -> list[dict]:
+def _detect_chips(png_chips: list[bytes]) -> list[list[dict]]:
+    """One batched request for every chip (up to MAX_CHIPS), not one request
+    per chip — PERF: this used to be a sequential per-chip httpx.post loop
+    (up to 9 round trips, each with its own model forward pass), which meant
+    a single analysis's detection step serialized 9x the network overhead
+    AND 9x the per-call model overhead. services/inference's ModelBackend
+    now runs one batched forward pass over the whole list (see
+    ModelBackend.predict_batch) — a real throughput win on GPU, and a real
+    latency win even on CPU. Returns [] immediately without a network call
+    when there are no chips (an AOI whose scene read produced zero tiles)."""
+    if not png_chips:
+        return []
     # SEC-09: shared-secret gate on the inference service — see
     # services/inference/app/security.py.
     response = httpx.post(
         f"{settings.inference_base_url}/detect",
-        json={"image_base64": base64.b64encode(png_bytes).decode()},
+        json={"images_base64": [base64.b64encode(b).decode() for b in png_chips]},
         headers={"X-Inference-Token": settings.inference_token},
-        timeout=60.0,
+        # One batched forward pass over up to MAX_CHIPS chips can legitimately
+        # take longer than a single chip did — generous headroom, especially
+        # on a CPU-only inference backend (see services/inference's device
+        # setting).
+        timeout=120.0,
     )
     response.raise_for_status()
     return response.json()["detections"]
@@ -93,21 +109,36 @@ def _box_to_geojson(box_px: tuple[float, float, float, float], transform: Affine
 def run_placeholder_detection(session: Session, analysis: AnalysisResult) -> None:
     """Best-effort placeholder object detection over date_b's true-color
     imagery, tiled into a fixed, capped grid of chips sent to
-    services/inference. The caller (app.tasks.change_detection) logs and
-    swallows failures here — a detection failure shouldn't flip an already
-    successful AnalysisResult to failed."""
+    services/inference. The caller (app.tasks.change_detection,
+    app.tasks.monitor_sweep) logs and swallows failures here — a detection
+    failure shouldn't flip an already successful AnalysisResult to failed.
+
+    Optical only: the model backends (services/inference) are trained on
+    COCO/optical-Sentinel-2 imagery, not SAR amplitude data — running them
+    over a SAR chip wouldn't detect real objects, it would produce
+    plausible-looking noise (CLAUDE.md's "never fake a capability"). Callers
+    are expected to gate on app.imagery.sensor.sensor_for_collection
+    themselves (see monitor_sweep.py); this is a defensive backstop in case
+    one doesn't."""
     aoi = session.get(AOI, analysis.aoi_id)
     if aoi is None:
         raise ChangeDetectionError(f"AOI {analysis.aoi_id} not found")
+    if sensor_for_collection(aoi.collection) is not SensorType.OPTICAL:
+        raise ChangeDetectionError(
+            f"object detection is optical-only; AOI {aoi.id} uses collection "
+            f"{aoi.collection!r} (no trained SAR detector exists yet)"
+        )
 
     geometry = wkb_to_geojson(aoi.geom)
     imagery = get_imagery_source()
-    scene_b = pick_best_scene(imagery, geometry, analysis.date_b, settings.stac_default_collection)
+    scene_b = pick_best_scene(imagery, geometry, analysis.date_b, aoi.collection)
     visual, transform, crs = _read_visual(scene_b, geometry)
 
-    for tile, tile_transform in _tile_chips(visual, transform):
-        png_bytes = _chip_to_png_bytes(tile)
-        detections = _detect_chip(png_bytes)
+    chips = _tile_chips(visual, transform)
+    png_chips = [_chip_to_png_bytes(tile) for tile, _ in chips]
+    batch_detections = _detect_chips(png_chips)
+
+    for (_tile, tile_transform), png_bytes, detections in zip(chips, png_chips, batch_detections):
         if not detections:
             continue
 

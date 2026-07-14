@@ -32,16 +32,19 @@ class MonitorBase(BaseModel):
     def _schedule_is_valid_cron(cls, value: str) -> str:
         return _validate_cron(value)
 
+    detect_on_change: bool = True
+
     @field_validator("threshold")
     @classmethod
     def _threshold_in_range(cls, value: float | None) -> float | None:
-        # NDVI-diff thresholds are meaningfully bounded (a real diff never
-        # exceeds 2.0 -- NDVI itself is in [-1, 1]) -- catches an obvious
-        # fat-fingered value (e.g. "20" meant as a percent) at creation
-        # time with a clear message, instead of a monitor that can now
-        # never trip (or always trips) for a reason that's opaque later.
-        if value is not None and not (0 <= value <= 2):
-            raise ValueError(f"threshold must be between 0 and 2 (got {value})")
+        # Two different physical units share this one field: NDVI-diff
+        # (optical, never exceeds 2.0 since NDVI itself is in [-1, 1]) and
+        # SAR log-ratio dB (typically 0-15dB, occasionally higher for a
+        # strong corner-reflector-like return) -- see app/imagery/sensor.py's
+        # default_change_threshold_for. 40 comfortably covers both while
+        # still catching an obvious fat-fingered value (e.g. "400").
+        if value is not None and not (0 <= value <= 40):
+            raise ValueError(f"threshold must be between 0 and 40 (got {value})")
         return value
 
 
@@ -54,6 +57,7 @@ class MonitorUpdate(BaseModel):
     threshold: float | None = None
     active: bool | None = None
     baseline_date: date | None = None
+    detect_on_change: bool | None = None
 
     @field_validator("schedule")
     @classmethod
@@ -63,8 +67,8 @@ class MonitorUpdate(BaseModel):
     @field_validator("threshold")
     @classmethod
     def _threshold_in_range(cls, value: float | None) -> float | None:
-        if value is not None and not (0 <= value <= 2):
-            raise ValueError(f"threshold must be between 0 and 2 (got {value})")
+        if value is not None and not (0 <= value <= 40):
+            raise ValueError(f"threshold must be between 0 and 40 (got {value})")
         return value
 
 

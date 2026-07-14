@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     imagery_source: str = "earth_search"
     stac_api_url: str = "https://earth-search.aws.element84.com/v1"
     stac_default_collection: str = "sentinel-2-l2a"
+    # Sentinel-1 GRD (SAR): same EarthSearchSource adapter, no dedicated
+    # imagery backend needed — see app/imagery/sensor.py for the collection
+    # -> pipeline dispatch this enables.
+    sar_collection: str = "sentinel-1-grd"
     static_catalog_manifest_path: str = "/data/demo/manifest.json"
     static_catalog_mount_path: str = "/data/demo"
 
@@ -93,6 +97,13 @@ class Settings(BaseSettings):
 
     # Change detection / monitoring
     change_detection_default_threshold: float = 0.2
+    # SAR log-ratio change detection is measured in dB, not NDVI units — 3dB
+    # is a commonly-cited rule-of-thumb minimum for a real (not speckle-noise)
+    # change in single/multi-look Sentinel-1 GRD amplitude comparisons (used
+    # e.g. in SAR flood-mapping literature); see
+    # app/services/sar_change_detection_pipeline.py for the honest caveats
+    # around orbit-geometry sensitivity this threshold doesn't correct for.
+    sar_change_detection_default_threshold: float = 3.0
     monitor_sweep_interval_seconds: int = 300
 
     # CORS. NoDecode: pydantic-settings otherwise JSON-decodes list-typed env

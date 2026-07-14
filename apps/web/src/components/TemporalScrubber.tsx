@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useAnalyses, useCreateAnalysis } from "../api/analyses";
+import { useAois } from "../api/aois";
 import { useStacScenes } from "../api/stac";
 import type { StacItemSummary } from "../api/types";
 import { useMonitorAlertStatus } from "../lib/monitorAlerts";
@@ -33,6 +34,8 @@ function tickPosition(sceneDate: string, from: string, to: string): number {
 export function TemporalScrubber() {
   const mode = useMapStore((s) => s.mode);
   const selectedAoiId = useAoiStore((s) => s.selectedAoiId);
+  const { data: aois } = useAois();
+  const selectedAoi = aois?.find((a) => a.id === selectedAoiId);
 
   // 24 months, not 3 (BRIEF v1.8, found for real on a fresh install): the
   // bundled demo scenes are ~several months to a year+ old by the time
@@ -75,7 +78,18 @@ export function TemporalScrubber() {
   // over (see api/stac.ts's useStacScenes for the "no imagery until reload"
   // bug this replaced). No manual auto-search effect needed anymore.
   const scenesQuery = useStacScenes(
-    selectedAoiId ? { aoi_id: selectedAoiId, date_from: dateFrom, date_to: dateTo } : null,
+    selectedAoiId
+      ? {
+          aoi_id: selectedAoiId,
+          date_from: dateFrom,
+          date_to: dateTo,
+          // Search the AOI's own sensor collection (optical vs SAR) — before
+          // this, every AOI searched the backend's global optical default
+          // regardless of what it was actually tracked against, so a SAR AOI
+          // would only ever turn up sentinel-2-l2a results (or none).
+          collections: selectedAoi ? [selectedAoi.collection] : undefined,
+        }
+      : null,
   );
   const scenes = scenesQuery.data ?? [];
 
@@ -150,12 +164,17 @@ export function TemporalScrubber() {
     const now = todayIso();
     return (
       <div className="panel scrubber">
-        <div className="scrubber-header">
+        {/* key={mode}: forces a real remount when switching Explore/Analyze
+            <-> Monitor (see styles.css's .scrubber-header comment) — without
+            it, React reconciles this same div in place across the branch
+            swap below and the pop-in animation would only ever fire once,
+            on first mount. */}
+        <div className="scrubber-header" key={mode}>
           <span className="scrubber-title">Timeline</span>
           <span className="status-value">Monitoring · live</span>
           {selectedAoiId && <span className="status-value-tertiary">watching AOI since {since}</span>}
         </div>
-        <div className="scrubber-axis">
+        <div className="scrubber-axis" key={mode}>
           <div className="scrubber-baseline" />
           {analyses.map((a) => (
             <div
@@ -179,7 +198,7 @@ export function TemporalScrubber() {
 
   return (
     <div className="panel scrubber">
-      <div className="scrubber-header">
+      <div className="scrubber-header" key={mode}>
         <span className="scrubber-title">Timeline</span>
         {scrubberMode === "single" ? (
           <span className="status-value">{singleDate ?? "no date selected"}</span>
@@ -223,7 +242,7 @@ export function TemporalScrubber() {
 
       {!selectedAoiId && <span className="status-value-tertiary">select an AOI first</span>}
 
-      <div className="scrubber-axis">
+      <div className="scrubber-axis" key={mode}>
         <div className="scrubber-baseline" />
         {scenes.map((scene) => {
           const dateStr = scene.datetime.slice(0, 10);

@@ -29,7 +29,14 @@ interface StacSearchInput {
 export function useStacScenes(input: StacSearchInput | null) {
   const token = useAuthStore((s) => s.token);
   return useQuery({
-    queryKey: ["stac-search", input?.aoi_id, input?.geometry, input?.date_from, input?.date_to],
+    queryKey: [
+      "stac-search",
+      input?.aoi_id,
+      input?.geometry,
+      input?.date_from,
+      input?.date_to,
+      input?.collections,
+    ],
     queryFn: () =>
       apiFetch<StacItemSummary[]>("/api/stac/search", {
         method: "POST",

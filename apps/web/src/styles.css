@@ -53,6 +53,8 @@
   /* Motion */
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* Assembly ease — long decel tail for the chrome boot-in stagger. */
+  --ease-assemble: cubic-bezier(0.16, 1, 0.3, 1);
   --dur-fast: 120ms;
   --dur-panel: 180ms;
   --dur-press: 90ms;
@@ -205,6 +207,75 @@ button {
     opacity: 1;
     transform: translateY(0);
     letter-spacing: 0.34em;
+  }
+}
+/* Chrome assembly (motion-pass brief, effect #1) — the HUD chrome staggers
+   in as the boot splash clears. Named vg-chrome-in, NOT the brief's
+   vg-boot-in: that name was already taken above by the splash wordmark's
+   letter-spacing animation, with different semantics. */
+@keyframes vg-chrome-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* The command bar centers itself with translateX(-50%); a keyframe ending in
+   `transform: none` would clobber that and snap it left — so its variant
+   carries the centering through both frames. */
+@keyframes vg-chrome-in-centered {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%);
+  }
+}
+/* Scan-sweep (effect #4) — a thin line tracks down the map while an analysis
+   is in flight. Transform-based (the brief animated `top`, which forces
+   layout every frame); translateY composites on the GPU. 100vh is safe: the
+   map region is always the full viewport (see .hud-shell). */
+@keyframes vg-scan-sweep {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  8% {
+    opacity: 0.8;
+  }
+  90% {
+    opacity: 0.5;
+  }
+  100% {
+    transform: translateY(100vh);
+    opacity: 0;
+  }
+}
+/* Ambient scope sweep (effect #3, reduced scope — see .map-radar-decor). */
+@keyframes vg-radar-sweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Selected-AOI breathing glow (effect #6 — cheap CSS variant, see README's
+   option (b): savedAoisLayer in MapCanvas.tsx is a deck.gl canvas layer, so
+   CSS can't reach it directly, and a second animated deck.gl layer just for
+   "selected, not alerted" would compete visually with the alert-glow layer
+   above for the same accent color while adding another per-tick rebuild —
+   not worth it for a plain-selection cue. Pulsing the row's own accent bar
+   in the AOI list gets the same "this one is live" read for free. */
+@keyframes vg-row-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 rgba(63, 184, 212, 0);
+  }
+  50% {
+    box-shadow: 0 0 6px 1px rgba(63, 184, 212, 0.65);
   }
 }
 
@@ -386,6 +457,75 @@ button {
 }
 
 /* ============================================================
+   Map ambient decoration (motion-pass brief, effect #3 — reduced scope)
+   ============================================================
+   Viewport-relative, not geo-anchored (the map has no basemap of its own —
+   see CLAUDE.md's air-gap invariant — so this costs nothing and works
+   air-gapped). Deliberately DROPS the source mockup's center crosshair and
+   invented "SECTOR 14-B" / "R 4.2 KM" labels: a crosshair reads as
+   lock-on/targeting iconography, which CLAUDE.md §5 rules out categorically
+   (see Compass.tsx's existing "no reticle/lock-on iconography" comment) —
+   kept to quiet concentric rings + one slow sweep, purely ambient "the feed
+   is live" texture, no aim point. */
+.map-radar-decor {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  overflow: hidden;
+}
+.map-radar-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+.map-radar-sweep {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1px;
+  height: 50vmax;
+  margin-left: -0.5px;
+  transform-origin: top center;
+  background: linear-gradient(to bottom, var(--accent), transparent 70%);
+  opacity: 0.4;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .map-radar-sweep {
+    animation: vg-radar-sweep 9s linear infinite;
+  }
+}
+
+/* Scan-sweep (effect #4) — visible only while an analysis is pending/running
+   (MapCanvas gates this on the same activeAnalysis.status check ResultsFeed
+   already uses for its job-card). */
+.map-scan-sweep {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  pointer-events: none;
+  z-index: 2;
+  background: linear-gradient(90deg, transparent, var(--accent-bright), transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .map-scan-sweep {
+    animation: vg-scan-sweep 2.4s linear infinite;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* No sensible static substitute for a sweep — just omit it rather than
+     freeze it mid-frame at an arbitrary position. */
+  .map-scan-sweep {
+    display: none;
+  }
+}
+
+/* ============================================================
    Compass rosette — bottom-right, above the timeline
    ============================================================ */
 .compass {
@@ -492,6 +632,7 @@ button {
   left: 0;
   right: 0;
   z-index: 10;
+  animation: vg-chrome-in 500ms var(--ease-assemble) both;
 }
 
 .hud-left {
@@ -506,6 +647,7 @@ button {
   min-height: 0;
   overflow-y: auto;
   z-index: 3;
+  animation: vg-chrome-in 500ms var(--ease-assemble) 200ms both;
 }
 
 .hud-right {
@@ -520,6 +662,18 @@ button {
   min-height: 0;
   overflow-y: auto;
   z-index: 3;
+  animation: vg-chrome-in 500ms var(--ease-assemble) 260ms both;
+}
+
+/* Reduced-motion: the one-time chrome stagger is brief enough to leave in
+   for everyone else, but honor an explicit request the same as .panel/.boot
+   do elsewhere in this file. */
+@media (prefers-reduced-motion: reduce) {
+  .hud-statusstrip,
+  .hud-left,
+  .hud-right {
+    animation: none;
+  }
 }
 
 /* Glass panel base, shared by every floating dock */
@@ -639,6 +793,15 @@ button {
   transition: background var(--dur-fast) var(--ease-out);
 }
 
+.row-bar-active {
+  background: var(--accent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .row-bar-active {
+    animation: vg-row-glow 2.4s ease-in-out infinite;
+  }
+}
+
 /* small bordered buttons reused across panels (tags, presets, icon buttons) */
 .tag,
 .icon-button,
@@ -712,14 +875,22 @@ button {
     transform var(--dur-press) var(--ease-out);
 }
 
-/* Pressed: a small, tactile depress. Excludes disabled controls. */
+/* Pressed: a small, tactile depress. Excludes disabled controls. .switch and
+   .row were already in the transition list above but never got a pressed
+   state of their own — added here. .row's depress is subtler (0.99, not
+   0.97): it's a much bigger hit target than a button, so the same scale
+   would read as an exaggerated jump rather than a press. */
 .tag:active:not(:disabled),
 .icon-button:active:not(:disabled),
 .aoi-draw-button:active:not(:disabled),
 .aoi-save-monitor-btn:active:not(:disabled),
 .mode-switcher-segment:active:not(:disabled),
-.scrubber-mode-toggle button:active:not(:disabled) {
+.scrubber-mode-toggle button:active:not(:disabled),
+.switch:active:not(:disabled) {
   transform: scale(0.97);
+}
+.row:active {
+  transform: scale(0.99);
 }
 
 /* Keyboard focus ring (pointer clicks don't trigger :focus-visible). */
@@ -944,6 +1115,13 @@ button {
   display: inline-flex;
   overflow: hidden;
   z-index: 9;
+  animation: vg-chrome-in 500ms var(--ease-assemble) 80ms both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mode-switcher {
+    animation: none;
+  }
 }
 
 .mode-switcher-segment {
@@ -979,7 +1157,21 @@ button {
   left: 50%;
   transform: translateX(-50%);
   width: 452px;
+  /* Found while building the motion pass: at narrower viewport widths this
+     fixed-452px, centered bar can overlap .mode-switcher (left: 16px, own
+     width varies with label text). Caps it to whatever room is actually
+     left of the mode switcher and its gap, so it shrinks instead of
+     colliding. Not itself a motion change — a real responsive bug the
+     stagger work surfaced. */
+  max-width: min(452px, calc(100vw - 580px));
   z-index: 9;
+  animation: vg-chrome-in-centered 500ms var(--ease-assemble) 140ms both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .command-bar {
+    animation: none;
+  }
 }
 
 .command-bar.expanded {
@@ -1111,6 +1303,7 @@ button {
 
 .aoi-draft-form {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--hairline);
@@ -1397,12 +1590,31 @@ button {
   padding: 9px 18px 10px;
   gap: 7px;
   z-index: 4;
+  animation: vg-chrome-in 500ms var(--ease-assemble) 320ms both;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .scrubber {
+    animation: none;
+  }
+}
+
+/* Reassemble pop (motion-pass brief, effect #2). TemporalScrubber's monitor
+   vs explore/analyze branches both return this same className at the same
+   tree position with no key, so React would otherwise patch it in place
+   (not remount it) on a mode switch — the component itself keys these two
+   elements on `mode` (see TemporalScrubber.tsx) specifically so this
+   animation actually replays instead of firing once on first mount only. */
 .scrubber-header {
   display: flex;
   align-items: center;
   gap: 14px;
+  animation: vg-chrome-in 300ms var(--ease-assemble) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scrubber-header {
+    animation: none;
+  }
 }
 
 .scrubber-title {
@@ -1442,6 +1654,58 @@ button {
   background: var(--accent-dim);
 }
 
+/* Sensor picker (Optical/SAR) at AOI creation — same segmented-control
+   language as .scrubber-mode-toggle, self-contained so it doesn't need to
+   join that class's scattered shared-selector lists above. */
+.aoi-sensor-toggle {
+  display: flex;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+  flex: none;
+}
+
+.aoi-sensor-toggle button {
+  padding: 3px 9px;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-right: 1px solid var(--hairline);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+
+.aoi-sensor-toggle button:last-child {
+  border-right: none;
+}
+
+.aoi-sensor-toggle button.active {
+  color: var(--accent-bright);
+  background: var(--accent-dim);
+}
+
+.aoi-sensor-toggle button:hover:not(.active):not(:disabled) {
+  color: var(--text-primary);
+}
+
+.aoi-sensor-toggle button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.aoi-sensor-toggle button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.aoi-sensor-toggle button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .scrubber-search-row {
   display: flex;
   align-items: center;
@@ -1463,6 +1727,12 @@ button {
   position: relative;
   height: 18px;
   flex: 1;
+  animation: vg-chrome-in 300ms var(--ease-assemble) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scrubber-axis {
+    animation: none;
+  }
 }
 
 .scrubber-baseline {

@@ -9,8 +9,15 @@ import { useAnalysis } from "../api/analyses";
 import { useAois } from "../api/aois";
 import { useDetections } from "../api/detections";
 import { darkVoidStyle } from "../lib/maplibreStyle";
+import { useMonitorAlertStatus } from "../lib/monitorAlerts";
 import { getRuntimeConfig } from "../lib/runtimeConfig";
-import { ndviTilejsonUrl, trueColorTilejsonUrl } from "../lib/tileUrl";
+import { sensorForCollection } from "../lib/sensor";
+import {
+  ndviTilejsonUrl,
+  sarAmplitudeTilejsonUrl,
+  sarFalseColorTilejsonUrl,
+  trueColorTilejsonUrl,
+} from "../lib/tileUrl";
 import { useAnalysisStore } from "../store/analysisStore";
 import { useAoiStore } from "../store/aoiStore";
 import { useAuthStore } from "../store/authStore";
@@ -29,6 +36,15 @@ const MUTED_FILL: [number, number, number, number] = [139, 148, 158, 18];
 // Detection red (matches the --alert token used across the HUD chrome).
 const DETECTION_RED: [number, number, number] = [248, 81, 73];
 const DETECTION_SELECTED_LINE: [number, number, number, number] = [255, 138, 128, 255];
+// Alert glow (motion-pass brief, effect #5 — reworked). The brief's mockup
+// used red corner "lock-brackets" snapped onto the alerted AOI; that's
+// lock-on/targeting iconography, which CLAUDE.md §5 rules out categorically
+// (see Compass.tsx's existing "no reticle/lock-on iconography" comment) —
+// the same restraint this codebase already applies everywhere else on the
+// map. A breathing accent-cyan outline draws the same eye to the same AOI
+// (an observation cue, "this is where a monitor fired"), with no aim point
+// and no red-on-a-box vocabulary.
+const ALERT_GLOW_LINE_RGB: [number, number, number] = [63, 184, 212];
 
 // Pulse (not blink): the detection/change overlays breathe smoothly between a
 // bright and a dim level, both reading the same shared level so they stay in
@@ -146,6 +162,7 @@ export function MapCanvas() {
   // while Detections or Change is on.
   const staticVectorLayersRef = useRef<Layer[]>([]);
   const detectionsLayerRef = useRef<Layer | null>(null);
+  const alertGlowLayerRef = useRef<Layer | null>(null);
 
   const viewState = useMapStore((s) => s.viewState);
   const setViewState = useMapStore((s) => s.setViewState);
@@ -160,8 +177,11 @@ export function MapCanvas() {
   const draftGeometry = useAoiStore((s) => s.draftGeometry);
   const setDraftGeometry = useAoiStore((s) => s.setDraftGeometry);
   const isDrawing = useAoiStore((s) => s.isDrawing);
+  const selectedAoi = aois?.find((a) => a.id === selectedAoiId);
+  const sensor = sensorForCollection(selectedAoi?.collection);
 
   const activeRasterLayer = useAnalysisStore((s) => s.activeRasterLayer);
+  const setActiveRasterLayer = useAnalysisStore((s) => s.setActiveRasterLayer);
   const rasterOpacity = useAnalysisStore((s) => s.rasterOpacity);
   const changeVisible = useAnalysisStore((s) => s.changeVisible);
   const detectionsVisible = useAnalysisStore((s) => s.detectionsVisible);
@@ -170,12 +190,53 @@ export function MapCanvas() {
   const inspectorTarget = useAnalysisStore((s) => s.inspectorTarget);
   const setInspectorTarget = useAnalysisStore((s) => s.setInspectorTarget);
 
+  // An AOI's base-layer options depend on its sensor (True Color/NDVI for
+  // optical, Amplitude/False Color for SAR — see lib/sensor.ts) and never
+  // overlap, so switching to an AOI of the other sensor can leave
+  // activeRasterLayer pointing at an option that AOI doesn't offer (e.g.
+  // "ndvi" selected, then the user switches to a SAR AOI) — nothing would
+  // render for the base layer at all. Snaps to that sensor's first option
+  // whenever the mismatch happens, rather than leaving the map blank.
+  useEffect(() => {
+    const opticalLayers = new Set(["true_color", "ndvi"]);
+    const sarLayers = new Set(["sar_amplitude", "sar_false_color"]);
+    const isMismatched =
+      sensor === "sar" ? opticalLayers.has(activeRasterLayer) : sarLayers.has(activeRasterLayer);
+    if (isMismatched) {
+      setActiveRasterLayer(sensor === "sar" ? "sar_amplitude" : "true_color");
+    }
+  }, [sensor, activeRasterLayer, setActiveRasterLayer]);
+
   const { data: activeAnalysis } = useAnalysis(activeAnalysisId ?? undefined);
   const { data: detections } = useDetections(activeAnalysisId ?? undefined);
   // Subscribed (not just read at request time like transformRequest does)
   // so the raster effect below re-runs when the token arrives — see its
   // comment for the race this closes.
   const tilerToken = useAuthStore((s) => s.tilerToken);
+
+  // Alert glow (see ALERT_GLOW_LINE_RGB above). useMonitorAlertStatus is
+  // already called independently by StatusStrip/MonitorPanel/TemporalScrubber
+  // — this just subscribes to the same react-query cache, no extra fetch.
+  const { alertMonitors, isAnyAlert } = useMonitorAlertStatus();
+  // A stable, value-comparable key for which AOIs are currently alerting.
+  // alertMonitors itself is a fresh array on every render (the hook
+  // recomputes it inline each call), so using it directly as an effect
+  // dependency below would rebuild the alert-glow/detections layers on
+  // every unrelated MapCanvas re-render (e.g. every tile-load toggling
+  // tilesLoading), not just when the alerting set actually changes —
+  // matches this file's existing PERF discipline (see the pulse-tick split
+  // above this component was built around).
+  const alertAoiIdsKey = alertMonitors
+    .map((m) => m.aoi_id)
+    .sort()
+    .join(",");
+
+  // Same one-time, non-reactive check BootSequence.tsx already uses. Gates
+  // every *continuous* loop this component drives (the shared pulse below,
+  // and the CSS radar-sweep/scan-sweep in styles.css) — a brief mid-page
+  // motion burst is left alone, only the infinite ambient ones are skipped.
+  const prefersReducedMotion =
+    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   // Shared pulse brightness (fraction of full opacity) for the detection/change
   // overlays, driven by one rAF loop so the two breathe in sync. Quantized to
@@ -189,10 +250,14 @@ export function MapCanvas() {
 
   const [pulseLevel, setPulseLevel] = useState(PULSE_BRIGHT);
   useEffect(() => {
-    const anyOverlay = detectionsVisible || changeVisible;
-    // Paused while drawing: a pulse tick re-runs the detections-layer effect,
-    // and there's no reason to churn anything mid-draw.
-    if (!anyOverlay || isDrawing) {
+    // isAnyAlert added (motion-pass brief, effect #5): the alert-glow layer
+    // below breathes off this same shared level, rather than running its
+    // own second interval for what's visually the same kind of pulse.
+    const anyOverlay = detectionsVisible || changeVisible || isAnyAlert;
+    // Paused while drawing (nothing to gain re-churning mid-draw), and
+    // entirely skipped under prefers-reduced-motion — pins at full
+    // brightness/opacity instead of a frozen mid-fade value.
+    if (!anyOverlay || isDrawing || prefersReducedMotion) {
       setPulseLevel(PULSE_BRIGHT);
       return;
     }
@@ -205,7 +270,7 @@ export function MapCanvas() {
     setPulseLevel(computeLevel());
     const interval = window.setInterval(() => setPulseLevel(computeLevel()), PULSE_TICK_MS);
     return () => window.clearInterval(interval);
-  }, [detectionsVisible, changeVisible, isDrawing]);
+  }, [detectionsVisible, changeVisible, isDrawing, isAnyAlert, prefersReducedMotion]);
 
   // Initialize the map + deck.gl overlay once.
   useEffect(() => {
@@ -428,15 +493,17 @@ export function MapCanvas() {
 
     staticVectorLayersRef.current = [savedAoisLayer, drawLayer];
     overlay.setProps({
-      layers: detectionsLayerRef.current
-        ? [...staticVectorLayersRef.current, detectionsLayerRef.current]
-        : staticVectorLayersRef.current,
+      layers: [
+        ...staticVectorLayersRef.current,
+        ...(alertGlowLayerRef.current ? [alertGlowLayerRef.current] : []),
+        ...(detectionsLayerRef.current ? [detectionsLayerRef.current] : []),
+      ],
     });
   }, [aois, selectedAoiId, draftGeometry, isDrawing, setSelectedAoiId, setDraftGeometry, setInspectorTarget]);
 
-  // Detections: red, pulsing, outlined in the shape of each detection box.
-  // Isolated from the effect above so a pulse tick (~12x/sec while visible)
-  // only ever rebuilds THIS layer, not the AOI/draw layers too.
+  // Detections + alert-glow: both driven by the shared pulse level. Isolated
+  // from the effect above so a pulse tick (~12x/sec while active) only ever
+  // rebuilds THESE two layers, not the AOI/draw layers too.
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
@@ -477,10 +544,41 @@ export function MapCanvas() {
         if (props) setInspectorTarget({ kind: "detection", id: props.id });
       },
     });
-
     detectionsLayerRef.current = detectionsLayer;
-    overlay.setProps({ layers: [...staticVectorLayersRef.current, detectionsLayer] });
-  }, [detections, detectionsVisible, inspectorTarget, pulseLevel, setInspectorTarget]);
+
+    // glowT: pulseLevel renormalized to a plain 0 (dim) .. 1 (bright) range,
+    // so the glow's width/alpha math doesn't have to know PULSE_DIM/BRIGHT's
+    // actual values.
+    const glowT = (pulseLevel - PULSE_DIM) / (PULSE_BRIGHT - PULSE_DIM);
+    const alertAoiIds = new Set(alertAoiIdsKey ? alertAoiIdsKey.split(",") : []);
+    const alertGlowLayer = new GeoJsonLayer({
+      id: "alert-glow",
+      data: {
+        type: "FeatureCollection",
+        features: (aois ?? [])
+          .filter((aoi) => alertAoiIds.has(aoi.id))
+          .map((aoi) => ({
+            type: "Feature" as const,
+            geometry: aoi.geometry,
+            properties: { id: aoi.id },
+          })),
+      },
+      stroked: true,
+      filled: false,
+      getLineColor: [...ALERT_GLOW_LINE_RGB, Math.round(140 + 115 * glowT)] as [number, number, number, number],
+      lineWidthUnits: "pixels",
+      getLineWidth: 3 + 5 * glowT,
+      updateTriggers: {
+        getLineColor: [pulseLevel],
+        getLineWidth: [pulseLevel],
+      },
+    });
+    alertGlowLayerRef.current = alertGlowLayer;
+
+    overlay.setProps({
+      layers: [...staticVectorLayersRef.current, alertGlowLayer, detectionsLayer],
+    });
+  }, [detections, detectionsVisible, inspectorTarget, pulseLevel, setInspectorTarget, aois, alertAoiIdsKey]);
 
   // Raster imagery: whichever single raster layer is active (mutually
   // exclusive — see LayersControl) at its own configured opacity.
@@ -544,9 +642,19 @@ export function MapCanvas() {
     };
 
     const applyLayers = () => {
+      const isSar = sensor === "sar";
       const visualHref = selectedScene?.assets.visual?.href;
       const trueColorUrl = visualHref ? trueColorTilejsonUrl(visualHref) : null;
       const ndviUrl = selectedScene?.self_href ? ndviTilejsonUrl(selectedScene.self_href) : null;
+      // SAR's vv/vh bands are multi-asset STAC-item reads too (same shape as
+      // NDVI's red/nir), so these key off self_href the same way NDVI does —
+      // there's no single-file "visual" composite for Sentinel-1.
+      const sarAmplitudeUrl = selectedScene?.self_href
+        ? sarAmplitudeTilejsonUrl(selectedScene.self_href)
+        : null;
+      const sarFalseColorUrl = selectedScene?.self_href
+        ? sarFalseColorTilejsonUrl(selectedScene.self_href)
+        : null;
       const changeUrl = activeAnalysis?.tilejson_url ?? null;
 
       // Every raster layer here is served by the tiler, which 401s any
@@ -562,19 +670,36 @@ export function MapCanvas() {
 
       // Base imagery (mutually exclusive) is inserted BENEATH the change
       // overlay so Change stacks on top of it — selecting Change no longer
-      // blanks the imagery; True Color / NDVI stays on underneath.
+      // blanks the imagery; whichever base layer is active stays on
+      // underneath. Only one sensor's pair is ever eligible at once (gated
+      // on isSar) — the mismatch-correction effect above keeps
+      // activeRasterLayer from pointing at the other sensor's option.
       syncRasterLayer(
         "true-color-layer",
         trueColorUrl,
-        tilerReady && activeRasterLayer === "true_color",
+        tilerReady && !isSar && activeRasterLayer === "true_color",
         rasterOpacity.true_color,
         "change-layer",
       );
       syncRasterLayer(
         "ndvi-layer",
         ndviUrl,
-        tilerReady && activeRasterLayer === "ndvi",
+        tilerReady && !isSar && activeRasterLayer === "ndvi",
         rasterOpacity.ndvi,
+        "change-layer",
+      );
+      syncRasterLayer(
+        "sar-amplitude-layer",
+        sarAmplitudeUrl,
+        tilerReady && isSar && activeRasterLayer === "sar_amplitude",
+        rasterOpacity.sar_amplitude,
+        "change-layer",
+      );
+      syncRasterLayer(
+        "sar-false-color-layer",
+        sarFalseColorUrl,
+        tilerReady && isSar && activeRasterLayer === "sar_false_color",
+        rasterOpacity.sar_false_color,
         "change-layer",
       );
       // Change is an independent overlay now (not part of the base radio),
@@ -591,7 +716,7 @@ export function MapCanvas() {
     // pulseLevel is intentionally NOT a dep — re-adding sources every frame
     // would be wasteful; the dedicated pulse effect below nudges only opacity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedScene, activeAnalysis, activeRasterLayer, changeVisible, rasterOpacity, tilerToken]);
+  }, [selectedScene, activeAnalysis, activeRasterLayer, changeVisible, rasterOpacity, tilerToken, sensor]);
 
   // Drives the Change overlay's pulse by nudging only its raster-opacity — a
   // cheap paint-property update (the layer's own opacity transition eases it),
@@ -603,9 +728,27 @@ export function MapCanvas() {
     map.setPaintProperty("change-layer", "raster-opacity", rasterOpacity.change * pulseLevel);
   }, [pulseLevel, changeVisible, rasterOpacity, activeAnalysis]);
 
+  // Scan-sweep (motion-pass brief, effect #4) — same condition ResultsFeed's
+  // job-card already uses for "an analysis is in flight".
+  const showScanSweep = Boolean(
+    activeAnalysis && (activeAnalysis.status === "pending" || activeAnalysis.status === "running"),
+  );
+
   return (
     <>
       <div ref={containerRef} className="map-canvas" />
+      {/* Ambient radar-scope decoration (motion-pass brief, effect #3 —
+          reduced scope, see ALERT_GLOW_LINE_RGB's comment and
+          styles.css's .map-radar-decor for why the crosshair/labels were
+          dropped). Viewport-relative, always visible, purely decorative —
+          no geo binding, costs nothing to keep mounted. */}
+      <div className="map-radar-decor" aria-hidden="true">
+        <div className="map-radar-ring" style={{ width: 220, height: 220 }} />
+        <div className="map-radar-ring" style={{ width: 380, height: 380 }} />
+        <div className="map-radar-ring" style={{ width: 560, height: 560 }} />
+        <div className="map-radar-sweep" />
+      </div>
+      {showScanSweep && <div className="map-scan-sweep" aria-hidden="true" />}
       {/* BRIEF v2, found for real, repeatedly, across this entire project's
           live testing history: there's no basemap here by design (see
           CLAUDE.md's air-gap invariant), so a solid black map is the

@@ -5,10 +5,32 @@ RUN groupadd --system vantage && useradd --system --gid vantage --no-create-home
 
 WORKDIR /app
 
+# GPU/CPU variant switch. "cpu" (default) installs the +cpu torch/torchvision
+# build (requirements.lock.txt) -- no CUDA runtime, works on any host.
+# "cuda" installs requirements.cuda.lock.txt (torch/torchvision +cu126)
+# instead -- the pip wheel bundles its own CUDA runtime libraries (cublas,
+# cudnn, etc.), so no nvidia/cuda base image is needed here; the HOST still
+# needs an NVIDIA driver new enough to report CUDA 12.6+ (driver >= 560.x)
+# and nvidia-container-toolkit installed so the container runtime can pass
+# the GPU through (see infra/docker-compose.gpu.yml, which sets this build
+# arg and requests the device reservation together -- one without the other
+# doesn't work).
+# Build with: docker build --build-arg INFERENCE_VARIANT=cuda ...
+# NOTE: not independently verified end-to-end against a live GPU container
+# in this sandbox (no container runtime + GPU passthrough available together
+# here) -- the lockfile's wheel resolution was verified for real (see
+# requirements.cuda.lock.txt's compile output), the runtime behavior wasn't.
+ARG INFERENCE_VARIANT=cpu
+
 # SEC-07: hash-pinned dependencies — see apps/api/Dockerfile's comment for
-# the full rationale; same mechanism, this service's own requirements.lock.txt.
-COPY services/inference/requirements.lock.txt /tmp/requirements.lock.txt
-RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock.txt
+# the full rationale; same mechanism, this service's own requirements*.lock.txt.
+# Renamed to a common /tmp/requirements.<variant>.lock.txt shape on the way in
+# so the RUN line below can select either with the one ARG, without the repo
+# file itself needing a "cpu" in its name (kept as requirements.lock.txt to
+# match apps/api/services/tiler's naming convention).
+COPY services/inference/requirements.lock.txt /tmp/requirements.cpu.lock.txt
+COPY services/inference/requirements.cuda.lock.txt /tmp/requirements.cuda.lock.txt
+RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements.${INFERENCE_VARIANT}.lock.txt
 
 COPY services/inference /app
 RUN pip install --no-cache-dir --no-deps .

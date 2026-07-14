@@ -18,13 +18,12 @@ class AnalysisCreate(BaseModel):
     @classmethod
     def _threshold_in_range(cls, value: float | None) -> float | None:
         # Same bound as MonitorBase's identical validator (app/schemas/
-        # monitor.py) — NDVI-diff never exceeds 2.0 since NDVI itself is in
-        # [-1, 1]. Found for real worth adding: nothing previously stopped
-        # a request for e.g. threshold=20 (meant as a percent, not a raw
-        # NDVI-diff value) from creating an analysis that could then never
-        # detect any change at all, silently.
-        if value is not None and not (0 <= value <= 2):
-            raise ValueError(f"threshold must be between 0 and 2 (got {value})")
+        # monitor.py) -- two units share this field (optical NDVI-diff,
+        # bounded by [-1, 1]'s own range, and SAR log-ratio dB, typically
+        # 0-15dB); 40 comfortably covers both while still catching an
+        # obvious fat-fingered value (e.g. "20" meant as a percent).
+        if value is not None and not (0 <= value <= 40):
+            raise ValueError(f"threshold must be between 0 and 40 (got {value})")
         return value
 
     @model_validator(mode="after")

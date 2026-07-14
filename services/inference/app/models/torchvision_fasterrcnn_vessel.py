@@ -50,17 +50,20 @@ class TorchvisionFasterRCNNVessel(ModelBackend):
         self._model.to(settings.device)
 
     @torch.inference_mode()
-    def predict(self, image: Image.Image) -> list[DetectionBox]:
-        tensor = to_tensor(image.convert("RGB")).to(settings.device)
-        output = self._model([tensor])[0]
+    def predict_batch(self, images: list[Image.Image]) -> list[list[DetectionBox]]:
+        tensors = [to_tensor(image.convert("RGB")).to(settings.device) for image in images]
+        outputs = self._model(tensors) if tensors else []
 
-        detections = []
-        for box, score, label in zip(
-            output["boxes"].tolist(), output["scores"].tolist(), output["labels"].tolist()
-        ):
-            if score < settings.score_threshold:
-                continue
-            detections.append(
-                DetectionBox(box=tuple(box), score=score, label=_CATEGORIES.get(label, "unknown"))
-            )
-        return detections
+        results = []
+        for output in outputs:
+            detections = []
+            for box, score, label in zip(
+                output["boxes"].tolist(), output["scores"].tolist(), output["labels"].tolist()
+            ):
+                if score < settings.score_threshold:
+                    continue
+                detections.append(
+                    DetectionBox(box=tuple(box), score=score, label=_CATEGORIES.get(label, "unknown"))
+                )
+            results.append(detections)
+        return results

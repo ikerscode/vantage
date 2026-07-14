@@ -190,7 +190,13 @@ services:
     <<: *hardened
     image: ${VANTAGE_API_IMAGE:-vantage-api:1.0.0}
     env_file: ${VANTAGE_DATA_DIR}/config/.env
-    command: celery -A app.core.celery_app worker --loglevel=info
+    # PERF: see docker-compose.yml's identical comment — this is a
+    # single-workstation app, and celery's prefork pool otherwise defaults to
+    # one process per CPU core, each holding a full windowed raster read in
+    # memory. 2 keeps worst-case concurrent memory use bounded; raise
+    # CELERY_WORKER_CONCURRENCY in the launcher-generated config for a
+    # beefier machine.
+    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-2}
     volumes:
       - ${VANTAGE_DATA_DIR}/logs:/var/log/vantage
       - ${VANTAGE_DATA_DIR}/demo-data:/data/demo:ro

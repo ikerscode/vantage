@@ -6,8 +6,13 @@ from app.core.config import settings
 from app.imagery.base import ImagerySource, SceneMetadata
 
 # Earth Search v1 sentinel-2-l2a asset keys we care about (visual true-color,
-# band-math inputs, and the SCL cloud mask).
-ASSET_KEYS = ("visual", "red", "green", "blue", "nir", "scl")
+# band-math inputs, and the SCL cloud mask), plus sentinel-1-grd's
+# polarization bands (each its own single-band COG, like optical's red/nir --
+# see app/imagery/sensor.py for how a collection routes to the pipeline that
+# reads these). Harmless to list both sensors' keys in one tuple: `if key in
+# item.assets` below means an optical item simply never has "vv"/"vh" and
+# vice versa.
+ASSET_KEYS = ("visual", "red", "green", "blue", "nir", "scl", "vv", "vh", "hh", "hv")
 
 # BRIEF v2, found for real on a live install: search() paged through EVERY
 # matching item with no cap and no network timeout. A continent-sized AOI
@@ -60,6 +65,7 @@ class EarthSearchSource(ImagerySource):
                     bbox=tuple(item.bbox) if item.bbox else (0.0, 0.0, 0.0, 0.0),
                     assets=assets,
                     self_href=item.get_self_href(),
+                    orbit_state=item.properties.get("sat:orbit_state"),
                 )
             )
         return scenes

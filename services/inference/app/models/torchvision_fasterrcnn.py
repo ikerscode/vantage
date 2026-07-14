@@ -25,17 +25,24 @@ class TorchvisionFasterRCNN(ModelBackend):
         self._model.to(settings.device)
 
     @torch.inference_mode()
-    def predict(self, image: Image.Image) -> list[DetectionBox]:
-        tensor = to_tensor(image.convert("RGB")).to(settings.device)
-        output = self._model([tensor])[0]
+    def predict_batch(self, images: list[Image.Image]) -> list[list[DetectionBox]]:
+        # torchvision detection models natively accept a list of tensors of
+        # different sizes in one forward pass (their internal transform pads/
+        # batches them) — one real batched call, not a Python-level loop
+        # hiding N model calls.
+        tensors = [to_tensor(image.convert("RGB")).to(settings.device) for image in images]
+        outputs = self._model(tensors) if tensors else []
 
-        detections = []
-        for box, score, label in zip(
-            output["boxes"].tolist(), output["scores"].tolist(), output["labels"].tolist()
-        ):
-            if score < settings.score_threshold:
-                continue
-            detections.append(
-                DetectionBox(box=tuple(box), score=score, label=self._categories[label])
-            )
-        return detections
+        results = []
+        for output in outputs:
+            detections = []
+            for box, score, label in zip(
+                output["boxes"].tolist(), output["scores"].tolist(), output["labels"].tolist()
+            ):
+                if score < settings.score_threshold:
+                    continue
+                detections.append(
+                    DetectionBox(box=tuple(box), score=score, label=self._categories[label])
+                )
+            results.append(detections)
+        return results

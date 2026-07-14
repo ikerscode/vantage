@@ -1,0 +1,24 @@
+# Source file for requirements.cuda.lock.txt (GPU-enabled variant of this
+# service). NOT used by the default CPU build — see pyproject.toml for that
+# lockfile's source of truth. Compiled with its own single-index pin (the
+# CUDA 12.6 wheel index) so there's no ambiguity between the CPU-local-segment
+# build and the CUDA build the way an unpinned range would have (see
+# pyproject.toml's comment on the exact +cpu pin for the full explanation —
+# the same PEP 440 resolver ambiguity applies in reverse here, which is why
+# this is a fully separate compile rather than a --extra flag on one file).
+#
+# cu126 (CUDA 12.6): chosen because it's the newest CUDA tag with full cp311
+# wheel coverage for torch==2.13.0/torchvision==0.28.0 at the time this was
+# generated (cu128/cu129/cu130 exist for other Python versions but not a
+# cp311+linux_x86_64 combination for these exact versions — verified against
+# https://download.pytorch.org/whl/cu126/ directly). Any driver new enough to
+# report CUDA 12.6+ in `nvidia-smi` (driver >= 560.x) can run this; the
+# container needs no CUDA toolkit installed on the host at all, only the
+# NVIDIA driver + nvidia-container-toolkit for device passthrough — the pip
+# wheel bundles its own CUDA runtime libraries (libcudart, cublas, cudnn).
+fastapi~=0.115
+uvicorn[standard]~=0.30
+pydantic-settings~=2.4
+torch==2.13.0+cu126
+torchvision==0.28.0+cu126
+pillow~=12.2

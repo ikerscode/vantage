@@ -33,6 +33,12 @@ export function AOIPanel() {
   const requestFlyTo = useMapStore((s) => s.requestFlyTo);
 
   const [draftName, setDraftName] = useState("");
+  // Sensor this AOI will be tracked with — fixed for its lifetime once saved
+  // (see apps/api/app/imagery/sensor.py). Defaults to optical since that's
+  // the backend's own default and the far more common case.
+  const [draftCollection, setDraftCollection] = useState<"sentinel-2-l2a" | "sentinel-1-grd">(
+    "sentinel-2-l2a",
+  );
 
   // First-launch UX: INSTALL.md/docs/AIRGAP.md both promise the bundled demo
   // AOI shows real imagery on open, with no manual step — before this, the
@@ -65,7 +71,7 @@ export function AOIPanel() {
       return;
     }
     createAoi.mutate(
-      { name: draftName.trim(), geometry: draftGeometry },
+      { name: draftName.trim(), geometry: draftGeometry, collection: draftCollection },
       {
         // Found while confirming the drawing fix live: a freshly-drawn AOI
         // never got selected, so the map stayed on its dark default view
@@ -76,6 +82,7 @@ export function AOIPanel() {
         onSuccess: (created) => {
           setDraftGeometry(null);
           setDraftName("");
+          setDraftCollection("sentinel-2-l2a");
           setIsDrawing(false);
           setSelectedAoiId(created.id);
           setInspectorTarget({ kind: "aoi", id: created.id });
@@ -90,6 +97,7 @@ export function AOIPanel() {
     setDraftGeometry(null);
     setIsDrawing(false);
     setDraftName("");
+    setDraftCollection("sentinel-2-l2a");
   };
 
   const isEmpty = !isLoading && (aois ?? []).length === 0;
@@ -117,11 +125,30 @@ export function AOIPanel() {
         <div className="aoi-draft-form">
           <input
             className="text-input"
-            style={{ flex: 1 }}
+            style={{ flex: "1 1 100%" }}
             placeholder="AOI name"
             value={draftName}
             onChange={(e) => setDraftName(e.target.value)}
           />
+          <div
+            className="aoi-sensor-toggle"
+            title="Sensor this AOI is tracked with — fixed once saved"
+          >
+            <button
+              className={draftCollection === "sentinel-2-l2a" ? "active" : ""}
+              onClick={() => setDraftCollection("sentinel-2-l2a")}
+              disabled={createAoi.isPending}
+            >
+              OPTICAL
+            </button>
+            <button
+              className={draftCollection === "sentinel-1-grd" ? "active" : ""}
+              onClick={() => setDraftCollection("sentinel-1-grd")}
+              disabled={createAoi.isPending}
+            >
+              SAR
+            </button>
+          </div>
           <button
             className={createAoi.isPending ? "tag btn-busy" : "tag"}
             onClick={handleSave}
@@ -169,7 +196,7 @@ export function AOIPanel() {
                   requestFlyTo({ longitude, latitude, zoom: 12 });
                 }}
               >
-                <div className="row-bar" style={{ background: active ? "var(--accent)" : "transparent" }} />
+                <div className={active ? "row-bar row-bar-active" : "row-bar"} />
                 <div className="row-column">
                   <div className="aoi-row-line1">
                     <span className={active ? "aoi-row-name active" : "aoi-row-name"}>{aoi.name}</span>

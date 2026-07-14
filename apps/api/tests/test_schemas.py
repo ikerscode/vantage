@@ -35,12 +35,24 @@ class TestMonitorValidation:
             MonitorCreate(aoi_id=uuid.uuid4(), schedule="not a cron")
 
     def test_threshold_out_of_range_rejected(self):
-        with pytest.raises(ValidationError, match="threshold must be between 0 and 2"):
-            MonitorCreate(aoi_id=uuid.uuid4(), schedule="0 6 * * *", threshold=20)
+        with pytest.raises(ValidationError, match="threshold must be between 0 and 40"):
+            MonitorCreate(aoi_id=uuid.uuid4(), schedule="0 6 * * *", threshold=200)
 
     def test_negative_threshold_rejected(self):
-        with pytest.raises(ValidationError, match="threshold must be between 0 and 2"):
+        with pytest.raises(ValidationError, match="threshold must be between 0 and 40"):
             MonitorCreate(aoi_id=uuid.uuid4(), schedule="0 6 * * *", threshold=-0.1)
+
+    def test_sar_scale_threshold_accepted(self):
+        # The bound was widened from [0, 2] (NDVI-diff only) to [0, 40] so a
+        # SAR log-ratio dB threshold (see app/imagery/sensor.py's
+        # default_change_threshold_for) fits the same field — this is the
+        # regression guard for that widening.
+        m = MonitorCreate(aoi_id=uuid.uuid4(), schedule="0 6 * * *", threshold=5.0)
+        assert m.threshold == 5.0
+
+    def test_detect_on_change_defaults_true(self):
+        m = MonitorCreate(aoi_id=uuid.uuid4(), schedule="0 6 * * *")
+        assert m.detect_on_change is True
 
 
 class TestAnalysisValidation:
@@ -56,14 +68,26 @@ class TestAnalysisValidation:
             AnalysisCreate(aoi_id=uuid.uuid4(), date_a=date(2025, 1, 1), date_b=date(2025, 1, 1))
 
     def test_threshold_out_of_range_rejected(self):
-        with pytest.raises(ValidationError, match="threshold must be between 0 and 2"):
-            AnalysisCreate(aoi_id=uuid.uuid4(), date_a=date(2025, 1, 1), date_b=date(2025, 6, 1), threshold=5.0)
+        with pytest.raises(ValidationError, match="threshold must be between 0 and 40"):
+            AnalysisCreate(aoi_id=uuid.uuid4(), date_a=date(2025, 1, 1), date_b=date(2025, 6, 1), threshold=200)
 
 
 class TestAoiGeometryValidation:
     def test_valid_small_polygon_accepted(self):
         aoi = AOICreate(name="test", geometry=_SMALL_VALID_POLYGON)
         assert aoi.geometry["type"] == "Polygon"
+
+    def test_collection_defaults_to_optical(self):
+        aoi = AOICreate(name="test", geometry=_SMALL_VALID_POLYGON)
+        assert aoi.collection == "sentinel-2-l2a"
+
+    def test_sar_collection_accepted(self):
+        aoi = AOICreate(name="test", geometry=_SMALL_VALID_POLYGON, collection="sentinel-1-grd")
+        assert aoi.collection == "sentinel-1-grd"
+
+    def test_unknown_collection_rejected(self):
+        with pytest.raises(ValidationError, match="unrecognized STAC collection"):
+            AOICreate(name="test", geometry=_SMALL_VALID_POLYGON, collection="landsat-c2-l2")
 
     def test_non_polygon_type_rejected(self):
         with pytest.raises(ValidationError, match="must be a GeoJSON Polygon"):

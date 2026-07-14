@@ -25,8 +25,20 @@ PATTERN='targeting|fire.?control|weaponeer|kill.?chain|weapon(ize|ization)?|leth
 
 # Exact file:line matches that are known-safe negations/compliance comments
 # *inside application code*. Extend only with a reviewed reason.
+#
+# NOTE: the previous entry here (MapCanvas.tsx:19) had gone stale — that
+# line is now plain import-statement code with no compliance comment at
+# all, almost certainly because an earlier edit reworded/moved the comment
+# it once pointed at without updating this allowlist. A dead file:line is
+# harmless (it just never matches anything), but leaving it violates this
+# project's own "honest, mechanically current markers" convention
+# (CLAUDE.md §3) — so it's corrected here, pointed at the actual current
+# location of MapCanvas.tsx's no-lock-on-iconography compliance comment
+# (added by the motion-pass brief's effect #5 rework, which replaced a
+# proposed red "lock-bracket" UI with an accent-cyan glow specifically to
+# stay on the right side of this boundary).
 ALLOWLIST=$(cat <<'EOF'
-apps/web/src/components/MapCanvas.tsx:19
+apps/web/src/components/MapCanvas.tsx:41
 EOF
 )
 

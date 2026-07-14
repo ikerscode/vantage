@@ -25,6 +25,9 @@ interface CreateAoiInput {
   name: string;
   description?: string;
   geometry: GeoJSONPolygon;
+  // "sentinel-2-l2a" (optical, backend default) | "sentinel-1-grd" (SAR) —
+  // see lib/sensor.ts. Omit to take the backend's optical default.
+  collection?: string;
 }
 
 export function useCreateAoi() {

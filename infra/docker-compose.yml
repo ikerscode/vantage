@@ -161,7 +161,18 @@ services:
       context: ..
       dockerfile: apps/api/Dockerfile
     env_file: .env
-    command: celery -A app.core.celery_app worker --loglevel=info
+    # PERF: celery's prefork pool defaults to one process per CPU core with
+    # no --concurrency given -- fine for a shared server, but this is a
+    # single-workstation app (see docker-compose.prod.yml's own framing) and
+    # each concurrent change-detection task holds a full-resolution windowed
+    # raster read (up to MAX_AOI_AREA_KM2's worth) in memory at once. A
+    # default of 12 concurrent tasks on a 12-thread laptop CPU with modest
+    # RAM headroom is a real way to make the whole machine crawl, not just
+    # this container. 2 lets an on-demand analysis and a monitor sweep run
+    # side by side without either queuing behind the other, while capping
+    # worst-case concurrent memory use -- raise CELERY_WORKER_CONCURRENCY in
+    # .env for a beefier or shared deployment.
+    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-2}
     depends_on:
       api-migrate:
         condition: service_completed_successfully

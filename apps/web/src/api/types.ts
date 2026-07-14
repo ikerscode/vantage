@@ -10,6 +10,10 @@ export interface AOI {
   name: string;
   description: string | null;
   geometry: GeoJSONPolygon;
+  // STAC collection this AOI is tracked against — "sentinel-2-l2a" (optical)
+  // or "sentinel-1-grd" (SAR). Fixed for the AOI's lifetime; see
+  // apps/api/app/imagery/sensor.py for the pipeline/UI dispatch this drives.
+  collection: string;
   created_at: string;
   updated_at: string;
   archived_at: string | null;

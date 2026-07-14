@@ -10,6 +10,9 @@ requires-python = ">=3.11"
 dependencies = [
     "numpy~=1.26",
     "rasterio~=1.3",
+    # SAR despeckling (vantage_geo.sar's median_filter) -- the only consumer
+    # of scipy in this package; everything else here is numpy/rasterio only.
+    "scipy~=1.13",
 ]
 
 [project.optional-dependencies]

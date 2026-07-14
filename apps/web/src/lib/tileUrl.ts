@@ -28,3 +28,37 @@ export function ndviTilejsonUrl(stacItemSelfHref: string): string {
   params.append("rescale", "-1,1");
   return `${getRuntimeConfig().tilerBaseUrl}/stac/WebMercatorQuad/tilejson.json?${params.toString()}`;
 }
+
+/**
+ * SAR amplitude (grayscale): Sentinel-1 GRD has no bundled RGB composite
+ * like optical's "visual" -- vv/vh are each a single-band COG (same
+ * multi-asset STAC-item shape as NDVI's red/nir), so this goes through the
+ * same /stac router. rescale is a documented starting point for Earth
+ * Search's typical uint16 GRD digital-number range, not independently
+ * verified against a live tile fetch in this sandbox (no outbound network
+ * available here) -- see IMAGERY_UX_FIXES_REPORT.md's verification-limits
+ * convention. Recalibrate against a real scene before relying on it.
+ */
+export function sarAmplitudeTilejsonUrl(stacItemSelfHref: string): string {
+  const params = new URLSearchParams({ url: stacItemSelfHref, rescale: "0,5000" });
+  params.append("assets", "vv");
+  return `${getRuntimeConfig().tilerBaseUrl}/stac/WebMercatorQuad/tilejson.json?${params.toString()}`;
+}
+
+/**
+ * SAR false color: R=VV, G=VH, B=VV/VH ratio -- a standard dual-pol SAR
+ * composite (water/smooth surfaces read dark, vegetation/rough surfaces
+ * read green-ish, urban/corner-reflector returns read bright). Same
+ * unverified-rescale caveat as sarAmplitudeTilejsonUrl above.
+ */
+export function sarFalseColorTilejsonUrl(stacItemSelfHref: string): string {
+  const params = new URLSearchParams({
+    url: stacItemSelfHref,
+    expression: "vv;vh;vv/vh",
+    asset_as_band: "true",
+    rescale: "0,5000;0,2000;0,5",
+  });
+  params.append("assets", "vv");
+  params.append("assets", "vh");
+  return `${getRuntimeConfig().tilerBaseUrl}/stac/WebMercatorQuad/tilejson.json?${params.toString()}`;
+}
