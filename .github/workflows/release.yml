@@ -281,13 +281,22 @@ jobs:
   airgap-acceptance-test:
     needs: [release, publish-images]
     runs-on: ubuntu-22.04
-    # BRIEF v1.9: least privilege. This job downloads already-published
-    # release assets and runs them on a clean runner; it never writes to the
-    # repo or its packages. An explicit read-only override, since the
-    # top-level `permissions: contents: write` (needed by `release`) would
-    # otherwise be inherited here too.
+    # BRIEF v1.9 set this to `contents: read` on the reasoning that this job
+    # only downloads already-published assets, never writes anything. Found
+    # for real on app-v2.0.1 (BRIEF v2.0, the first release cut since that
+    # change): `release` creates the release as a draft
+    # (releaseDraft: true), and this job's own release IS still a draft at
+    # the point it runs -- `gh release download` against a draft needs
+    # `contents: write` on the token; `read` gets a bare "release not found"
+    # with no further detail, which looks exactly like a missing/renamed
+    # tag and cost real debugging time to tell apart from one. Confirmed by
+    # elimination: the identical `gh release download` command against the
+    # identical tag worked immediately with a write-scoped token. Same
+    # `contents: write` the top-level block already grants `release` --
+    # this job needing it too isn't a new elevation, just no longer
+    # pretending read was enough.
     permissions:
-      contents: read
+      contents: write
     steps:
       # Only for scripts/smoke.sh's already-correct, already-proven tile-
       # fetch logic below (real z/x/y math, no hardcoded STAC item IDs) —
@@ -477,12 +486,15 @@ jobs:
   thin-installer-acceptance-test:
     needs: [release, publish-images]
     runs-on: ubuntu-22.04
-    # BRIEF v1.9: least privilege. Downloads the installer release asset and
-    # pulls the (public) GHCR images anonymously, without writing to the repo
-    # or its packages. Explicit read-only override of the inherited top-level
-    # write scope.
+    # `contents: write` for the same reason as airgap-acceptance-test's
+    # identical comment: this job's own release is still a draft
+    # (releaseDraft: true) when it runs, and `gh release download` against
+    # a draft needs write on the token -- read-only (BRIEF v1.9's original
+    # choice here) fails with a bare "release not found", found for real on
+    # app-v2.0.1. Pulling the (public) GHCR images afterward is still
+    # anonymous and needs no token scope at all.
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
