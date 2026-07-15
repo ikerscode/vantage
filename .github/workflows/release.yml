@@ -270,6 +270,27 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Found for real on app-v2.0.1/app-v2.0.2 (BRIEF v2.0): `release`
+      # creates every release as a draft, and nothing ever published one
+      # afterward -- so every release cut since BRIEF v1.9 added the
+      # digest-manifest fetch has been silently broken for real thin-install
+      # users. The compiled launcher fetches image-digests.json via a plain,
+      # unauthenticated https://github.com/.../releases/download/<tag>/...
+      # URL (that's what a real end user's installed app has to use -- no
+      # GITHUB_TOKEN, no `gh` CLI), and GitHub does not serve a draft
+      # release's assets over that URL at all, regardless of who's asking.
+      # `gh release download` (used elsewhere in this workflow, and by a
+      # maintainer's own `gh` CLI) doesn't hit this: it goes through the
+      # authenticated API, which can see drafts. Publishing here, only once
+      # every real asset (installers from `release`, image-digests.json and
+      # the offline-bundle chunks from the steps above) is already attached,
+      # is what actually makes the thin-install path work for anyone who
+      # isn't a maintainer with API access.
+      - name: Publish the release (thin-install needs it non-draft, BRIEF v2.0)
+        run: gh release edit "${{ github.ref_name }}" --draft=false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # BRIEF v1.6: the actual BRIEF v1.3 §12 acceptance test — "install on a
   # clean machine, cut network access, launch, confirm the demo AOI renders
   # real Sentinel-2 imagery with zero network calls" — never done once,
