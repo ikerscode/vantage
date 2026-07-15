@@ -11,7 +11,28 @@ never fails, even when the real weights aren't present.
 placeholder) never reads anything from this directory.** It only matters if
 you opt into `MODEL_BACKEND=torchvision_fasterrcnn_vessel`.
 
-To produce `vessel_fasterrcnn.pth` yourself:
+**BRIEF v2.0: the published image already has it baked in.** The
+`vantage-inference` image built and pushed by `release.yml`'s
+`publish-images` job fetches the real checkpoint from a dedicated GitHub
+Release (tag [`model-weights-v1`](https://github.com/ikerscode/vantage/releases/tag/model-weights-v1),
+kept separate from `app-v*` tags so it isn't re-uploaded on every app
+release) before the Docker build, so anyone pulling the published image or
+installing via the launcher gets a working vessel backend with no extra
+steps — just set `MODEL_BACKEND=torchvision_fasterrcnn_vessel`. The steps
+below are only for building the checkpoint yourself from scratch (e.g. to
+retrain on new data) or for building `services/inference`'s image locally
+without going through the release pipeline.
+
+To get `vessel_fasterrcnn.pth` for a local (non-release-pipeline) build,
+download the same asset the release workflow uses instead of retraining:
+
+```
+gh release download model-weights-v1 --repo ikerscode/vantage \
+  --pattern vessel_fasterrcnn.pth --dir services/inference/weights
+echo "53878268a049583a40a366aade7ed00b85dd9e65b6cc745b9bbe703ef921ec2a  services/inference/weights/vessel_fasterrcnn.pth" | sha256sum -c -
+```
+
+Or reproduce it from scratch (real training run, not required for normal use):
 
 ```
 cd scripts/train_vessel_detector
