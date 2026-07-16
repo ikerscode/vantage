@@ -1,6 +1,28 @@
 # VANTAGE
 
-A satellite-imagery intelligence workbench for defense/ISR analysts. Analysts define an AOI, explore the imagery archive, run change detection + object detection, and stand up monitors that alert on change. Mission-console UX — the UI floats over a full-bleed map, not a SaaS dashboard.
+VANTAGE is a satellite-imagery analysis workbench built for defense and ISR analysts. Point it at an area of interest and it pulls in optical and radar imagery, tracks what's changed between two dates, and can watch that area on a schedule so you find out about changes as they happen instead of checking back manually.
+
+It's an analysis tool, not a targeting system. VANTAGE reports what's present and what changed in overhead imagery, nothing more. It does not do targeting, fire-control, strike planning, or any sensor-to-shooter automation, and that isn't a v1-vs-later-version scoping question: it never becomes in scope. See `COMPLIANCE.md` and `CLAUDE.md` for the fuller statement of that boundary.
+
+## What it does
+
+- **Define an area of interest** by drawing a polygon on the map, then reshape it later by dragging its vertices around or adding new ones.
+- **Browse the imagery archive** for that AOI across both optical (Sentinel-2) and radar (Sentinel-1 SAR) sources, one date at a time.
+- **Run change detection** between two dates: an NDVI-diff pass for vegetation change, plus general true-color change detection, both rendered as an overlay on the map.
+- **Detect objects** in the imagery with a real, fine-tuned model (vessel detection at Sentinel-2 resolution), alongside a COCO-pretrained placeholder that proves out the same pipeline ahead of any future model swap.
+- **Set up a monitor** on an AOI: a recurring scheduled check that fires an alert once change crosses a threshold, so you're not the one who has to remember to look again.
+- **Jump to any location** by coordinate, MGRS grid reference, or AOI name from a single command bar.
+
+## Use cases
+
+- Watching a harbor or coastline for vessel traffic and flagging new arrivals.
+- Tracking construction, clearing, or other land-use change at a facility over weeks or months.
+- Catching vegetation change (drought stress, deforestation, crop-cycle shifts) via NDVI, instead of a human comparing two images by eye.
+- Standing up a recurring watch across a dozen AOIs at once and only looking closer at the ones that actually alert.
+
+## Design posture
+
+The whole thing is one full-bleed dark map with panels floating over it, not a SaaS dashboard bolted onto a sidebar. No crosshairs, no lock-on iconography, no red "threat" boxes: detections render as neutral outline boxes, opacity scaled by the model's confidence, with one accent color reserved for chrome and selection. It's also meant to be self-hostable end to end, with no hard runtime dependency on external SaaS anywhere in the core path (see "Air-gap repoint" below), and there are both an online (thin) installer and a genuinely offline, air-gapped install path.
 
 See `CLAUDE.md` for the always-on architectural context (invariants, conventions) that governs this codebase.
 
