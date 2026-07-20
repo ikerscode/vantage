@@ -50,6 +50,11 @@ class AnalysisRead(BaseModel):
     status: str
     error_message: str | None
     stats: dict | None
+    # Object-detection sub-step outcome, reported separately from `status` so a
+    # "0 detections" result is never ambiguous (see DetectionStatus).
+    detection_status: str | None = None
+    detection_count: int | None = None
+    detection_error: str | None = None
     tilejson_url: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -69,6 +74,9 @@ class AnalysisRead(BaseModel):
             status=analysis.status,
             error_message=analysis.error_message,
             stats=analysis.stats,
+            detection_status=analysis.detection_status,
+            detection_count=analysis.detection_count,
+            detection_error=analysis.detection_error,
             tilejson_url=tilejson_url,
             created_at=analysis.created_at,
             updated_at=analysis.updated_at,

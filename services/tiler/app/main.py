@@ -3,12 +3,26 @@ import os
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from rio_tiler.io import STACReader
+from titiler.core.errors import DEFAULT_STATUS_CODES, add_exception_handlers
 from titiler.core.factory import MultiBaseTilerFactory, TilerFactory
 from titiler.core.middleware import CacheControlMiddleware
 
 from app.security import require_tiler_token, validated_url
 
 app = FastAPI(title="VANTAGE Tiler")
+
+# Found live, running a real analysis end-to-end: a small AOI's analysis COG
+# only covers a small extent, so MapLibre's tile grid at the current viewport
+# routinely requests tiles OUTSIDE that extent (or a source COG's real bounds
+# generally). rio-tiler raises TileOutsideBounds for those, which — with no
+# handler registered — propagated as an unhandled 500. FastAPI's default
+# error path for an uncaught exception doesn't go back through
+# CORSMiddleware's header injection, so the browser reported it as a CORS
+# failure instead, masking the real cause and leaving the whole Change/NDVI/
+# True Color raster looking silently broken. titiler ships exactly the
+# mapping this needs (TileOutsideBounds -> a clean 404, still CORS-safe) —
+# it's opt-in, and this app never opted in.
+add_exception_handlers(app, DEFAULT_STATUS_CODES)
 
 # PERF: found for real — tile/tilejson responses carried no Cache-Control at
 # all, so panning back over an already-seen area re-fetched and re-rendered

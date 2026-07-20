@@ -35,7 +35,20 @@ const MUTED_LINE: [number, number, number, number] = [139, 148, 158, 160];
 const MUTED_FILL: [number, number, number, number] = [139, 148, 158, 18];
 // Detection red (matches the --alert token used across the HUD chrome).
 const DETECTION_RED: [number, number, number] = [248, 81, 73];
-const DETECTION_SELECTED_LINE: [number, number, number, number] = [255, 138, 128, 255];
+// A brighter, distinct red for whichever detection is the current Inspector
+// selection — still pulses (see detectionAlpha below), just a different hue
+// from the ambient ones so "this is the one you clicked" stays legible while
+// both breathe together.
+const DETECTION_SELECTED_LINE: [number, number, number] = [255, 138, 128];
+// Change-select outline: the AOI boundary of whichever change result is
+// currently selected (a ResultsFeed CHG row, or Inspector's "analysis" view),
+// by the same alerting-palette exception as detections above — orange, not
+// the cyan accent, and not a lock-on box (CLAUDE.md §5). Change itself is
+// already rendered as a raster (the colorized NDVI-diff/SAR log-ratio COG,
+// pulsing via its own opacity — see the raster-sync effect below); this is a
+// SEPARATE vector layer so a selected change result gets the same crisp,
+// pulsing outline treatment detections get, not just a fading raster.
+const CHANGE_ORANGE: [number, number, number] = [255, 149, 0];
 // Alert glow (motion-pass brief, effect #5, reworked). The brief's mockup
 // used red corner "lock-brackets" snapped onto the alerted AOI, which is
 // exactly the reticle/lock-on iconography CLAUDE.md §5 rules out (see
@@ -163,6 +176,7 @@ export function MapCanvas() {
   const staticVectorLayersRef = useRef<Layer[]>([]);
   const detectionsLayerRef = useRef<Layer | null>(null);
   const alertGlowLayerRef = useRef<Layer | null>(null);
+  const changeOutlineLayerRef = useRef<Layer | null>(null);
 
   const viewState = useMapStore((s) => s.viewState);
   const setViewState = useMapStore((s) => s.setViewState);
@@ -212,6 +226,15 @@ export function MapCanvas() {
 
   const { data: activeAnalysis } = useAnalysis(activeAnalysisId ?? undefined);
   const { data: detections } = useDetections(activeAnalysisId ?? undefined);
+  // Change-select outline needs whichever analysis the Inspector is CURRENTLY
+  // showing, not necessarily activeAnalysisId — Inspector's own "VIEW
+  // ANALYSIS" button (reached from an event) can point inspectorTarget at a
+  // different analysis than the one currently loaded as the Change raster
+  // (see Inspector.tsx). react-query dedupes this against the activeAnalysis
+  // query above when the ids match, so this is free in the common case
+  // (clicking a CHG row in ResultsFeed sets both to the same id).
+  const selectedAnalysisId = inspectorTarget?.kind === "analysis" ? inspectorTarget.id : undefined;
+  const { data: selectedAnalysis } = useAnalysis(selectedAnalysisId);
   // Subscribed (not just read at request time like transformRequest does)
   // so the raster effect below re-runs when the token arrives — see its
   // comment for the race this closes.
@@ -563,6 +586,7 @@ export function MapCanvas() {
       layers: [
         ...staticVectorLayersRef.current,
         ...(alertGlowLayerRef.current ? [alertGlowLayerRef.current] : []),
+        ...(changeOutlineLayerRef.current ? [changeOutlineLayerRef.current] : []),
         ...(detectionsLayerRef.current ? [detectionsLayerRef.current] : []),
       ],
     });
@@ -586,8 +610,10 @@ export function MapCanvas() {
     const overlay = overlayRef.current;
     if (!overlay) return;
 
-    // Alpha follows the shared pulse level (a smooth cosine breathe). The
-    // selected box holds a steady bright highlight.
+    // Alpha follows the shared pulse level (a smooth cosine breathe) for every
+    // box, selected or not — the selected one just breathes in a brighter,
+    // distinct red (DETECTION_SELECTED_LINE) instead of going static, so
+    // "outline and pulse red" holds for whichever one is actually selected too.
     const detectionAlpha = Math.round(255 * pulseLevel);
     const detectionsLayer = new GeoJsonLayer({
       id: "detections",
@@ -606,7 +632,7 @@ export function MapCanvas() {
       filled: true,
       getLineColor: (f: { properties: { id: string } }) =>
         inspectorTarget?.kind === "detection" && inspectorTarget.id === f.properties.id
-          ? DETECTION_SELECTED_LINE
+          ? ([...DETECTION_SELECTED_LINE, detectionAlpha] as [number, number, number, number])
           : ([...DETECTION_RED, detectionAlpha] as [number, number, number, number]),
       // Faint red wash so the box still reads as a detection at the dim end of
       // the pulse; the outline is what carries the shape.
@@ -653,10 +679,51 @@ export function MapCanvas() {
     });
     alertGlowLayerRef.current = alertGlowLayer;
 
-    overlay.setProps({
-      layers: [...staticVectorLayersRef.current, alertGlowLayer, detectionsLayer],
+    // Change-select outline: the AOI boundary of whichever change result is
+    // currently selected (selectedAnalysis, see its own comment above),
+    // rendered the same way alert-glow is — a pulsing vector outline — but in
+    // ORANGE, matching detections' RED, per the palette comment at the top of
+    // this file. Fixes "selecting a change result shows no outline": Change
+    // itself is a raster overlay (colorize_diff's own colors, opacity-pulsed
+    // by the effect below), which never gave a selected result any distinct,
+    // crisp boundary of its own.
+    const changeOutlineAoi =
+      selectedAnalysis && selectedAnalysis.status === "done"
+        ? (aois ?? []).find((a) => a.id === selectedAnalysis.aoi_id)
+        : undefined;
+    const changeOutlineLayer = new GeoJsonLayer({
+      id: "change-outline",
+      data: {
+        type: "FeatureCollection",
+        features: changeOutlineAoi
+          ? [{ type: "Feature" as const, geometry: changeOutlineAoi.geometry, properties: {} }]
+          : [],
+      },
+      stroked: true,
+      filled: false,
+      getLineColor: [...CHANGE_ORANGE, Math.round(140 + 115 * glowT)] as [number, number, number, number],
+      lineWidthUnits: "pixels",
+      getLineWidth: 3 + 5 * glowT,
+      updateTriggers: {
+        getLineColor: [pulseLevel],
+        getLineWidth: [pulseLevel],
+      },
     });
-  }, [detections, detectionsVisible, inspectorTarget, pulseLevel, setInspectorTarget, aois, alertAoiIdsKey]);
+    changeOutlineLayerRef.current = changeOutlineLayer;
+
+    overlay.setProps({
+      layers: [...staticVectorLayersRef.current, alertGlowLayer, changeOutlineLayer, detectionsLayer],
+    });
+  }, [
+    detections,
+    detectionsVisible,
+    inspectorTarget,
+    pulseLevel,
+    setInspectorTarget,
+    aois,
+    alertAoiIdsKey,
+    selectedAnalysis,
+  ]);
 
   // Raster imagery: whichever single raster layer is active (mutually
   // exclusive — see LayersControl) at its own configured opacity.
@@ -664,20 +731,15 @@ export function MapCanvas() {
     const map = mapRef.current;
     if (!map) return;
 
-    const syncRasterLayer = (
-      id: string,
-      url: string | null,
-      visible: boolean,
-      opacity: number,
-      beforeId?: string,
-    ) => {
+    const removeRasterLayer = (id: string) => {
       const sourceId = `${id}-source`;
-      if (!visible || !url) {
-        if (map.getLayer(id)) map.removeLayer(id);
-        if (map.getSource(sourceId)) map.removeSource(sourceId);
-        delete rasterSourceUrls.current[sourceId];
-        return;
-      }
+      if (map.getLayer(id)) map.removeLayer(id);
+      if (map.getSource(sourceId)) map.removeSource(sourceId);
+      delete rasterSourceUrls.current[sourceId];
+    };
+
+    const addOrUpdateRasterLayer = (id: string, url: string, opacity: number, beforeId?: string) => {
+      const sourceId = `${id}-source`;
       // The source exists but was built for a different scene/analysis (its URL
       // changed) — tear it down so it's re-created below with the new URL.
       if (map.getSource(sourceId) && rasterSourceUrls.current[sourceId] !== url) {
@@ -752,38 +814,61 @@ export function MapCanvas() {
       // underneath. Only one sensor's pair is ever eligible at once (gated
       // on isSar) — the mismatch-correction effect above keeps
       // activeRasterLayer from pointing at the other sensor's option.
-      syncRasterLayer(
-        "true-color-layer",
-        trueColorUrl,
-        tilerReady && !isSar && activeRasterLayer === "true_color",
-        rasterOpacity.true_color,
-        "change-layer",
-      );
-      syncRasterLayer(
-        "ndvi-layer",
-        ndviUrl,
-        tilerReady && !isSar && activeRasterLayer === "ndvi",
-        rasterOpacity.ndvi,
-        "change-layer",
-      );
-      syncRasterLayer(
-        "sar-amplitude-layer",
-        sarAmplitudeUrl,
-        tilerReady && isSar && activeRasterLayer === "sar_amplitude",
-        rasterOpacity.sar_amplitude,
-        "change-layer",
-      );
-      syncRasterLayer(
-        "sar-false-color-layer",
-        sarFalseColorUrl,
-        tilerReady && isSar && activeRasterLayer === "sar_false_color",
-        rasterOpacity.sar_false_color,
-        "change-layer",
-      );
-      // Change is an independent overlay now (not part of the base radio),
-      // gated on its own visibility toggle. Its live opacity is driven by the
-      // pulse effect below, so we seed it here at the current pulse level.
-      syncRasterLayer("change-layer", changeUrl, tilerReady && changeVisible, rasterOpacity.change * pulseLevel);
+      const specs: { id: string; url: string | null; visible: boolean; opacity: number; beforeId?: string }[] = [
+        {
+          id: "true-color-layer",
+          url: trueColorUrl,
+          visible: tilerReady && !isSar && activeRasterLayer === "true_color",
+          opacity: rasterOpacity.true_color,
+          beforeId: "change-layer",
+        },
+        {
+          id: "ndvi-layer",
+          url: ndviUrl,
+          visible: tilerReady && !isSar && activeRasterLayer === "ndvi",
+          opacity: rasterOpacity.ndvi,
+          beforeId: "change-layer",
+        },
+        {
+          id: "sar-amplitude-layer",
+          url: sarAmplitudeUrl,
+          visible: tilerReady && isSar && activeRasterLayer === "sar_amplitude",
+          opacity: rasterOpacity.sar_amplitude,
+          beforeId: "change-layer",
+        },
+        {
+          id: "sar-false-color-layer",
+          url: sarFalseColorUrl,
+          visible: tilerReady && isSar && activeRasterLayer === "sar_false_color",
+          opacity: rasterOpacity.sar_false_color,
+          beforeId: "change-layer",
+        },
+        // Change is an independent overlay now (not part of the base radio),
+        // gated on its own visibility toggle. Its live opacity is driven by
+        // the pulse effect below, so we seed it here at the current pulse level.
+        {
+          id: "change-layer",
+          url: changeUrl,
+          visible: tilerReady && changeVisible,
+          opacity: rasterOpacity.change * pulseLevel,
+        },
+      ];
+
+      // Tear down every now-inactive layer in one full pass BEFORE adding
+      // anything new, rather than interleaving add/remove per layer (the old
+      // shape: true-color add, ndvi remove, sar-amp remove, ...). With base
+      // layers mutually exclusive, interleaving meant a slow or failed add for
+      // the newly-selected layer could leave a later removal in the same pass
+      // never reached — the previously-active layer would stay on screen,
+      // looking like the toggle silently did nothing. Removing everything
+      // inactive first guarantees the old layer can never survive a switch,
+      // regardless of what happens on the add side.
+      for (const spec of specs) {
+        if (!spec.visible || !spec.url) removeRasterLayer(spec.id);
+      }
+      for (const spec of specs) {
+        if (spec.visible && spec.url) addOrUpdateRasterLayer(spec.id, spec.url, spec.opacity, spec.beforeId);
+      }
     };
 
     if (map.isStyleLoaded()) {

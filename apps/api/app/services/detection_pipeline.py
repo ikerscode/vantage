@@ -19,7 +19,7 @@ from app.core.config import settings
 from app.imagery.factory import get_imagery_source
 from app.imagery.sensor import SensorType, sensor_for_collection
 from app.models.aoi import AOI
-from app.models.analysis_result import AnalysisResult
+from app.models.analysis_result import AnalysisResult, DetectionStatus
 from app.models.detection import Detection
 from app.schemas.geo import geojson_to_wkb, wkb_to_geojson
 from app.services.change_detection_pipeline import ChangeDetectionError, pick_best_scene
@@ -67,6 +67,19 @@ def _chip_to_png_bytes(chip: np.ndarray) -> bytes:
     return buffer.getvalue()
 
 
+# Found live (running a real analysis end-to-end): one run's inference call
+# failed with "Server disconnected without sending a response" and NO
+# corresponding request ever logged on the inference side — a stale/reset
+# connection between containers (an idle keep-alive connection closed by the
+# peer or the network layer between low-frequency requests), not the
+# inference service actually failing. One retry on a fresh connection is
+# cheap insurance against exactly that; it does NOT cover a real HTTP error
+# status (raise_for_status below), which is a genuine application failure,
+# not a transient network one, and is deliberately left to propagate on the
+# first attempt.
+_DETECT_MAX_ATTEMPTS = 2
+
+
 def _detect_chips(png_chips: list[bytes]) -> list[list[dict]]:
     """One batched request for every chip (up to MAX_CHIPS), not one request
     per chip — PERF: this used to be a sequential per-chip httpx.post loop
@@ -81,18 +94,32 @@ def _detect_chips(png_chips: list[bytes]) -> list[list[dict]]:
         return []
     # SEC-09: shared-secret gate on the inference service — see
     # services/inference/app/security.py.
-    response = httpx.post(
-        f"{settings.inference_base_url}/detect",
-        json={"images_base64": [base64.b64encode(b).decode() for b in png_chips]},
-        headers={"X-Inference-Token": settings.inference_token},
-        # One batched forward pass over up to MAX_CHIPS chips can legitimately
-        # take longer than a single chip did — generous headroom, especially
-        # on a CPU-only inference backend (see services/inference's device
-        # setting).
-        timeout=120.0,
-    )
-    response.raise_for_status()
-    return response.json()["detections"]
+    payload = {"images_base64": [base64.b64encode(b).decode() for b in png_chips]}
+    headers = {"X-Inference-Token": settings.inference_token}
+
+    for attempt in range(1, _DETECT_MAX_ATTEMPTS + 1):
+        try:
+            response = httpx.post(
+                f"{settings.inference_base_url}/detect",
+                json=payload,
+                headers=headers,
+                # One batched forward pass over up to MAX_CHIPS chips can
+                # legitimately take longer than a single chip did — generous
+                # headroom, especially on a CPU-only inference backend (see
+                # services/inference's device setting).
+                timeout=120.0,
+            )
+            response.raise_for_status()
+            return response.json()["detections"]
+        except httpx.TransportError as exc:
+            if attempt >= _DETECT_MAX_ATTEMPTS:
+                raise
+            logger.warning(
+                "inference request failed (%s: %s), retrying once on a fresh connection",
+                type(exc).__name__,
+                exc,
+            )
+    raise AssertionError("unreachable — loop above always returns or raises")
 
 
 def _box_to_geojson(box_px: tuple[float, float, float, float], transform: Affine, crs: object) -> dict:
@@ -106,7 +133,7 @@ def _box_to_geojson(box_px: tuple[float, float, float, float], transform: Affine
     return shapely_mapping(shapely_box(min(lons), min(lats), max(lons), max(lats)))
 
 
-def run_placeholder_detection(session: Session, analysis: AnalysisResult) -> None:
+def run_placeholder_detection(session: Session, analysis: AnalysisResult) -> int:
     """Best-effort placeholder object detection over date_b's true-color
     imagery, tiled into a fixed, capped grid of chips sent to
     services/inference. The caller (app.tasks.change_detection,
@@ -119,7 +146,13 @@ def run_placeholder_detection(session: Session, analysis: AnalysisResult) -> Non
     plausible-looking noise (CLAUDE.md's "never fake a capability"). Callers
     are expected to gate on app.imagery.sensor.sensor_for_collection
     themselves (see monitor_sweep.py); this is a defensive backstop in case
-    one doesn't."""
+    one doesn't.
+
+    Returns the number of detections written, and on a clean run records
+    DetectionStatus.OK plus that count on the analysis (0 is a real answer, not
+    a failure). The caller owns the FAILED/SKIPPED cases — only it knows
+    whether a raised error means "attempted and errored" vs "deliberately not
+    attempted" — see app.tasks.change_detection."""
     aoi = session.get(AOI, analysis.aoi_id)
     if aoi is None:
         raise ChangeDetectionError(f"AOI {analysis.aoi_id} not found")
@@ -138,6 +171,7 @@ def run_placeholder_detection(session: Session, analysis: AnalysisResult) -> Non
     png_chips = [_chip_to_png_bytes(tile) for tile, _ in chips]
     batch_detections = _detect_chips(png_chips)
 
+    written = 0
     for (_tile, tile_transform), png_bytes, detections in zip(chips, png_chips, batch_detections):
         if not detections:
             continue
@@ -156,4 +190,10 @@ def run_placeholder_detection(session: Session, analysis: AnalysisResult) -> Non
                     chip_s3_key=chip_key,
                 )
             )
+            written += 1
+
+    analysis.detection_status = DetectionStatus.OK.value
+    analysis.detection_count = written
+    analysis.detection_error = None
     session.commit()
+    return written

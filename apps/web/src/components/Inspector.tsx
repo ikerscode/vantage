@@ -77,6 +77,27 @@ export function Inspector() {
                 <dd className="error-text">{analysis.error_message}</dd>
               </>
             )}
+            {/* Detection is a separate sub-step: show its outcome explicitly so
+                "0 detections" is never ambiguous. Only meaningful once the
+                analysis itself is done (before that detection hasn't run). */}
+            {analysis.status === "done" && analysis.detection_status && (
+              <>
+                <dt>DETECTION</dt>
+                <dd className={analysis.detection_status === "failed" ? "error-text" : undefined}>
+                  {analysis.detection_status === "ok"
+                    ? `${analysis.detection_count ?? 0} object${analysis.detection_count === 1 ? "" : "s"}`
+                    : analysis.detection_status === "skipped"
+                      ? "skipped (no detector for this sensor)"
+                      : "failed"}
+                </dd>
+                {analysis.detection_status === "failed" && analysis.detection_error && (
+                  <>
+                    <dt>DET ERROR</dt>
+                    <dd className="error-text">{analysis.detection_error}</dd>
+                  </>
+                )}
+              </>
+            )}
           </dl>
         );
       }

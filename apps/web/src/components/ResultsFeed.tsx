@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-import { useAnalyses, useAnalysis } from "../api/analyses";
+import { useAnalyses, useAnalysis, analysisIsStalled } from "../api/analyses";
 import { useAois } from "../api/aois";
 import { useDetections } from "../api/detections";
 import { useEvents } from "../api/events";
@@ -49,7 +49,12 @@ export function ResultsFeed() {
     return Array.from(byId.values()).sort((a, b) => b.created_at.localeCompare(a.created_at));
   }, [initialEvents, liveEvents]);
 
-  const jobPending = activeAnalysis && (activeAnalysis.status === "pending" || activeAnalysis.status === "running");
+  const jobInProgress =
+    activeAnalysis && (activeAnalysis.status === "pending" || activeAnalysis.status === "running");
+  // A job stuck pending/running past the stall deadline (see analysisIsStalled)
+  // has stopped being polled — surface that as a terminal STALLED state rather
+  // than an indeterminate bar that animates forever with no job behind it.
+  const jobStalled = analysisIsStalled(activeAnalysis);
 
   if (mode === "monitor") {
     const now = Date.now();
@@ -150,14 +155,22 @@ export function ResultsFeed() {
           <span className="panel-header-meta">STREAMING</span>
         </div>
       </div>
-      {jobPending && (
-        <div className="job-card">
+      {jobInProgress && (
+        <div className={jobStalled ? "job-card stalled" : "job-card"}>
           <div className="job-card-header">
-            <span className="job-card-name">CHANGE DETECTION · {activeAnalysis.status.toUpperCase()}</span>
+            <span className="job-card-name">
+              CHANGE DETECTION · {jobStalled ? "STALLED" : activeAnalysis.status.toUpperCase()}
+            </span>
           </div>
-          <div className="job-card-track">
-            <div className="job-card-fill indeterminate" />
-          </div>
+          {jobStalled ? (
+            <div className="job-card-note">
+              no worker response after 5 min — the job is still queued. check the change-detection worker is running.
+            </div>
+          ) : (
+            <div className="job-card-track">
+              <div className="job-card-fill indeterminate" />
+            </div>
+          )}
         </div>
       )}
       <ul className="row-list" style={{ flex: 1 }}>

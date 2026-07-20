@@ -8,7 +8,7 @@ from app.db.session import SessionLocal
 from app.imagery.factory import get_imagery_source
 from app.imagery.sensor import SensorType, default_change_threshold_for, sensor_for_collection
 from app.models.aoi import AOI
-from app.models.analysis_result import AnalysisResult, AnalysisStatus
+from app.models.analysis_result import AnalysisResult, AnalysisStatus, DetectionStatus
 from app.models.event import Event
 from app.models.monitor import Monitor
 from app.schemas.geo import wkb_to_geojson
@@ -148,9 +148,17 @@ def sweep_monitors() -> None:
             # why SAR is excluded: no honest detector exists for it yet).
             if _should_run_detection(monitor, sensor, changed_pixel_count):
                 try:
-                    run_placeholder_detection(session, analysis)
-                except Exception:
+                    run_placeholder_detection(session, analysis)  # records OK + count itself
+                except Exception as exc:
+                    # Same honest-seams handling as the manual path (see
+                    # app.tasks.change_detection): a best-effort detection
+                    # failure doesn't fail the sweep, but it's recorded on the
+                    # analysis rather than swallowed silently.
                     session.rollback()
+                    analysis = session.get(AnalysisResult, analysis.id)
+                    analysis.detection_status = DetectionStatus.FAILED.value
+                    analysis.detection_error = str(exc)
+                    session.commit()
                     logger.exception(
                         "auto-detection-on-change failed for analysis %s (monitor %s)",
                         analysis.id,

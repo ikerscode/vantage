@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { useAnalyses, useCreateAnalysis } from "../api/analyses";
+import { useAnalyses, useAnalysis, useCreateAnalysis, analysisIsStalled } from "../api/analyses";
 import { useAois } from "../api/aois";
 import { useStacScenes } from "../api/stac";
 import type { StacItemSummary } from "../api/types";
@@ -106,12 +106,32 @@ export function TemporalScrubber() {
   const dateB = useAnalysisStore((s) => s.dateB);
   const setDateA = useAnalysisStore((s) => s.setDateA);
   const setDateB = useAnalysisStore((s) => s.setDateB);
+  const activeAnalysisId = useAnalysisStore((s) => s.activeAnalysisId);
   const setActiveAnalysisId = useAnalysisStore((s) => s.setActiveAnalysisId);
   const setInspectorTarget = useAnalysisStore((s) => s.setInspectorTarget);
   const setChangeVisible = useAnalysisStore((s) => s.setChangeVisible);
 
   const createAnalysis = useCreateAnalysis();
   const { data: recentAnalyses } = useAnalyses(mode === "monitor" ? (selectedAoiId ?? undefined) : undefined);
+
+  // Only one change-detection run at a time. `createAnalysis.isPending` alone
+  // covers just the ~100ms POST — the moment it resolves the button re-enabled
+  // even though the Celery job it kicked off was still pending/running, so
+  // impatient re-clicks piled up several overlapping runs (each surfacing as
+  // its own row once done). Poll the run this submit produced (activeAnalysisId
+  // is set in handleRunAnalysis's onSuccess) and stay disabled until it reaches
+  // a terminal — or stalled — state. A stalled job (see analysisIsStalled)
+  // counts as NOT in flight so the operator can retry rather than being locked
+  // out forever behind a wedged worker.
+  const activeAnalysisQuery = useAnalysis(activeAnalysisId ?? undefined);
+  const activeAnalysis = activeAnalysisQuery.data;
+  const runInFlight =
+    createAnalysis.isPending ||
+    // Freshly submitted, first status GET still in flight (no data yet) — hold
+    // the guard across the gap between the POST resolving and the poll starting.
+    (!!activeAnalysisId && activeAnalysisQuery.isFetching && activeAnalysis == null) ||
+    ((activeAnalysis?.status === "pending" || activeAnalysis?.status === "running") &&
+      !analysisIsStalled(activeAnalysis));
   const { alertMonitorIds, monitors } = useMonitorAlertStatus();
   const aoiIsAlert = monitors.some((m) => m.aoi_id === selectedAoiId && alertMonitorIds.has(m.id));
 
@@ -148,7 +168,7 @@ export function TemporalScrubber() {
   };
 
   const handleRunAnalysis = () => {
-    if (!selectedAoiId || !dateA || !dateB) return;
+    if (!selectedAoiId || !dateA || !dateB || runInFlight) return;
     createAnalysis.mutate(
       { aoi_id: selectedAoiId, date_a: dateA, date_b: dateB },
       {
@@ -215,17 +235,22 @@ export function TemporalScrubber() {
       <div className="panel scrubber" style={{ height: scrubberHeight }}>
         <div className="scrubber-resize-handle" onMouseDown={handleResizeStart} title="Drag to resize" />
         <div className="scrubber-body">
-          {/* key={mode}: forces a real remount when switching Explore/Analyze
-              <-> Monitor (see styles.css's .scrubber-header comment). Without
-              it, React reconciles this same div in place across the branch
-              swap below and the pop-in animation would only ever fire once,
-              on first mount. */}
-          <div className="scrubber-header" key={mode}>
+          {/* key={`header-${mode}`}/key={`axis-${mode}`}: forces a real remount
+              when switching Explore/Analyze <-> Monitor (see styles.css's
+              .scrubber-header comment). Without it, React reconciles this same
+              div in place across the branch swap below and the pop-in
+              animation would only ever fire once, on first mount. Namespaced
+              per element (not a bare key={mode} on both) — found for real:
+              .scrubber-header and .scrubber-axis are SIBLINGS under the same
+              parent, so sharing the identical key value across both was a
+              genuine React key collision (console warning, undefined
+              reconciliation behavior), not just a naming style choice. */}
+          <div className="scrubber-header" key={`header-${mode}`}>
             <span className="scrubber-title">Timeline</span>
             <span className="status-value">Monitoring · live</span>
             {selectedAoiId && <span className="status-value-tertiary">watching AOI since {since}</span>}
           </div>
-          <div className="scrubber-axis" key={mode}>
+          <div className="scrubber-axis" key={`axis-${mode}`}>
             <div className="scrubber-baseline" />
             {analyses.map((a) => (
               <div
@@ -252,7 +277,7 @@ export function TemporalScrubber() {
     <div className="panel scrubber" style={{ height: scrubberHeight }}>
       <div className="scrubber-resize-handle" onMouseDown={handleResizeStart} title="Drag to resize" />
       <div className="scrubber-body">
-        <div className="scrubber-header" key={mode}>
+        <div className="scrubber-header" key={`header-${mode}`}>
           <span className="scrubber-title">Timeline</span>
           {scrubberMode === "single" ? (
             <span className="status-value">{singleDate ?? "no date selected"}</span>
@@ -296,7 +321,7 @@ export function TemporalScrubber() {
 
         {!selectedAoiId && <span className="status-value-tertiary">select an AOI first</span>}
 
-        <div className="scrubber-axis" key={mode}>
+        <div className="scrubber-axis" key={`axis-${mode}`}>
         <div className="scrubber-baseline" />
         {scenes.map((scene) => {
           const dateStr = scene.datetime.slice(0, 10);
@@ -366,14 +391,14 @@ export function TemporalScrubber() {
 
         {mode === "analyze" && (
           <button
-            className={createAnalysis.isPending ? "tag btn-busy" : "tag"}
+            className={runInFlight ? "tag btn-busy" : "tag"}
             onClick={handleRunAnalysis}
-            disabled={!dateA || !dateB || createAnalysis.isPending}
+            disabled={!dateA || !dateB || runInFlight}
           >
-            {createAnalysis.isPending ? (
+            {runInFlight ? (
               <>
                 <span className="spinner" />
-                SUBMITTING…
+                {createAnalysis.isPending ? "SUBMITTING…" : "RUNNING…"}
               </>
             ) : (
               "RUN ANALYSIS"

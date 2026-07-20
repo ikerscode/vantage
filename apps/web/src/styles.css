@@ -1918,6 +1918,16 @@ button {
   animation: vg-indeterminate 1.4s linear infinite;
 }
 
+.job-card.stalled .job-card-name {
+  color: var(--alert);
+}
+
+.job-card-note {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
 .result-kind-chip {
   font-family: var(--font-mono);
   font-size: 8.5px;

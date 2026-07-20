@@ -38,6 +38,8 @@ export interface StacItemSummary {
 
 export type AnalysisStatus = "pending" | "running" | "done" | "failed";
 
+export type DetectionStatus = "ok" | "failed" | "skipped";
+
 export interface AnalysisResult {
   id: string;
   aoi_id: string;
@@ -48,6 +50,12 @@ export interface AnalysisResult {
   status: AnalysisStatus;
   error_message: string | null;
   stats: Record<string, number | null> | null;
+  // Object-detection sub-step outcome, reported separately from `status`.
+  // null = not tracked / hasn't run yet. "ok" with detection_count 0 means
+  // detection ran and honestly found nothing (not a failure).
+  detection_status: DetectionStatus | null;
+  detection_count: number | null;
+  detection_error: string | null;
   tilejson_url: string | null;
   created_at: string;
   updated_at: string;
