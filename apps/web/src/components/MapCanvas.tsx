@@ -79,6 +79,37 @@ const PULSE_TICK_MS = 80;
 
 const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection" as const, features: [] };
 
+// Found live (driving the app headless): DrawPolygonMode's double-click and
+// Enter-key handlers call finishDrawing() unconditionally, and finishDrawing
+// builds a turf polygon from the click sequence — with fewer than 3 placed
+// vertices that ring has under 4 positions, so turf throws "Each LinearRing
+// of a Polygon must have 4 or more Positions." as an UNCAUGHT error from the
+// event handler. Any user double-clicking before their third vertex hits it.
+// A premature finish gesture should be a no-op that keeps the placed vertices
+// (so the user just keeps clicking), not a throw and not a silent reset.
+class GuardedDrawPolygonMode extends DrawPolygonMode {
+  private canFinish(): boolean {
+    return this.getClickSequence().length >= 3;
+  }
+
+  handleDoubleClick(
+    event: Parameters<DrawPolygonMode["handleDoubleClick"]>[0],
+    props: Parameters<DrawPolygonMode["handleDoubleClick"]>[1],
+  ): void {
+    if (!this.canFinish()) return;
+    super.handleDoubleClick(event, props);
+  }
+
+  handleKeyUp(
+    event: Parameters<DrawPolygonMode["handleKeyUp"]>[0],
+    props: Parameters<DrawPolygonMode["handleKeyUp"]>[1],
+  ): void {
+    // Enter shares finishDrawing's crash path; Escape (cancel) must keep working.
+    if (event.key === "Enter" && !this.canFinish()) return;
+    super.handleKeyUp(event, props);
+  }
+}
+
 // ---- Graticule ------------------------------------------------------------
 // A quiet lat/lon grid drawn client-side over the whole map. This is the map's
 // answer to "the void is featureless": real cartographic structure — actual
@@ -532,7 +563,7 @@ export function MapCanvas() {
             features: [{ type: "Feature", geometry: activeGeometry, properties: {} }],
           }
         : EMPTY_FEATURE_COLLECTION,
-      mode: editingAoiId ? new ModifyMode() : isDrawing ? new DrawPolygonMode() : new ViewMode(),
+      mode: editingAoiId ? new ModifyMode() : isDrawing ? new GuardedDrawPolygonMode() : new ViewMode(),
       // ModifyMode needs its one feature selected to expose draggable vertex
       // handles; DrawPolygonMode (a brand-new, not-yet-a-feature shape)
       // doesn't use selection at all.

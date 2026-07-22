@@ -6,7 +6,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.config import settings
 from app.core.limiter import limiter
-from app.routers import analyses, aois, auth, detections, events, health, monitors, stac
+from app.routers import analyses, aois, auth, detections, events, health, inference, monitors, stac
 
 # SEC-10: /docs, /redoc, /openapi.json expose the full API surface (routes,
 # schemas, param names) to anyone who can reach this process — fine for
@@ -43,5 +43,6 @@ app.include_router(aois.router, prefix=API_PREFIX)
 app.include_router(stac.router, prefix=API_PREFIX)
 app.include_router(analyses.router, prefix=API_PREFIX)
 app.include_router(detections.router, prefix=API_PREFIX)
+app.include_router(inference.router, prefix=API_PREFIX)
 app.include_router(monitors.router, prefix=API_PREFIX)
 app.include_router(events.router, prefix=API_PREFIX)

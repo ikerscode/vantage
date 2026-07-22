@@ -2,10 +2,12 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@ta
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+// Only the weights styles.css actually uses (400 base, 500/600 emphasis) —
+// each import ships a real woff2 to every visitor, so an unused weight is
+// pure dead bytes (a 700 import sat here unused until a weight audit).
 import "@fontsource/ibm-plex-sans/400.css";
 import "@fontsource/ibm-plex-sans/500.css";
 import "@fontsource/ibm-plex-sans/600.css";
-import "@fontsource/ibm-plex-sans/700.css";
 import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "@fontsource/ibm-plex-mono/600.css";

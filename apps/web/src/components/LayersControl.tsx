@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 
 import { useAois } from "../api/aois";
+import { useInferenceStatus } from "../api/inference";
 import { sensorForCollection } from "../lib/sensor";
 import { type BaseRasterLayerId, useAnalysisStore } from "../store/analysisStore";
 import { useAoiStore } from "../store/aoiStore";
@@ -35,6 +36,7 @@ export function LayersControl() {
   const toggleChangeVisible = useAnalysisStore((s) => s.toggleChangeVisible);
   const detectionsVisible = useAnalysisStore((s) => s.detectionsVisible);
   const toggleDetectionsVisible = useAnalysisStore((s) => s.toggleDetectionsVisible);
+  const { data: inferenceStatus } = useInferenceStatus();
 
   const baseLayers = isSar ? SAR_BASE_LAYERS : OPTICAL_BASE_LAYERS;
   // Base is always live (1); overlays add to the count when on. Detections
@@ -148,14 +150,20 @@ export function LayersControl() {
         </div>
       )}
 
-      {/* Honest seam (CLAUDE.md §3): the bundled detector is a COCO-pretrained
-          generic model, not an overhead-imagery one — it essentially never
-          fires on 10 m/px satellite chips. Say so rather than let an
-          always-empty layer read as a bug. */}
-      {!isSar && detectionsVisible && (
+      {/* Honest seam (CLAUDE.md §3): describe the detector the inference
+          service REPORTS it's running (see api/inference.ts), not a hardcoded
+          assumption. Found live: this note used to unconditionally describe
+          the COCO placeholder and kept doing so after the deployment had been
+          switched to the fine-tuned vessel backend — exactly the config-drift
+          lie the honest-seams rule exists to prevent. Renders nothing until
+          the status query resolves rather than flashing a wrong description. */}
+      {!isSar && detectionsVisible && inferenceStatus && (
         <div className="layer-note">
-          Generic placeholder detector (COCO classes) — expected to find little
-          or nothing on satellite imagery. See report for the vessel-model path.
+          {!inferenceStatus.reachable
+            ? "Inference service unreachable — object detection will fail until it's back up."
+            : inferenceStatus.model_backend === "torchvision_fasterrcnn_vessel"
+              ? "Vessel detector (fine-tuned for Sentinel-2) — finds vessels only; other object classes aren't detected."
+              : "Generic placeholder detector (COCO classes) — expected to find little or nothing on satellite imagery. Set MODEL_BACKEND=torchvision_fasterrcnn_vessel for the maritime detector."}
         </div>
       )}
     </div>
